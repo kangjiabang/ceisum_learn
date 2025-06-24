@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // Your access token can be found at: https://ion.cesium.com/tokens.
+    // This is the default access token from your ion account
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // currentTileset = viewer.scene.primitives.add(
+    //   await Cesium.Cesium3DTileset.fromUrl(
+    //     `http://localhost:5173/assets/0_0_0-2_1_1/tileset.json`,
+    //     {
+    //       debugShowBoundingVolume: true,
+    //     }
+    //   )
+    // );
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://localhost:5173/assets/xiaoshan_3dtiles/tileset.json",
+        {
+          debugShowBoundingVolume: true, // 优化动态加载
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+
+    //添加点击事件监听器
+    viewer.canvas.addEventListener('click', async (event) => {
+
+      const width = viewer.canvas.clientWidth;
+      const height = viewer.canvas.clientHeight;
+
+      if (!width || !height) {
+        console.error("❌ canvas 尺寸异常", { width, height });
+        return;
+      }
+      // 获取鼠标点击的窗口坐标（相对于 canvas 的 x, y）
+      const rect = viewer.canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      console.log("点击坐标:", { x, y });
+      // 获取相机方向
+      const ray = viewer.camera.getPickRay(new Cesium.Cartesian2(x, y));
+      if (!ray) {
+        console.log("⚠️ 无法生成射线");
+        return;
+      }
+
+      const intersection = viewer.scene.pickFromRay(ray);
+
+      if (intersection && intersection.position) {
+        const hitPoint = intersection.position;
+        const cartographic = Cesium.Cartographic.fromCartesian(hitPoint);
+
+        const lon = Cesium.Math.toDegrees(cartographic.longitude);
+        const lat = Cesium.Math.toDegrees(cartographic.latitude);
+        const height = cartographic.height;
+
+        console.log("✅ 命中模型！");
+        console.log(`世界坐标:`, hitPoint);
+        console.log(`地理坐标: 经度=${lon.toFixed(6)}, 纬度=${lat.toFixed(6)}, 高度=${height.toFixed(2)} 米`);
+
+        // 计算距离：相机位置 vs 碰撞点
+        const cameraPosition = viewer.camera.positionWC;
+        const distance = Cesium.Cartesian3.distance(cameraPosition, hitPoint);
+        console.log(`📏 相机到命中点的距离: ${distance.toFixed(2)} 米`);
+
+        // 可视化命中点
+        viewer.entities.add({
+          position: hitPoint,
+          point: {
+            pixelSize: 10,
+            color: Cesium.Color.RED
+          }
+        });
+      } else {
+        console.log("❌ 未命中任何物体");
+      }
+    });
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // Your access token can be found at: https://ion.cesium.com/tokens.
+    // This is the default access token from your ion account
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // currentTileset = viewer.scene.primitives.add(
+    //   await Cesium.Cesium3DTileset.fromUrl(
+    //     `http://localhost:5173/assets/0_0_0-2_1_1/tileset.json`,
+    //     {
+    //       debugShowBoundingVolume: true,
+    //     }
+    //   )
+    // );
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://localhost:5173/assets/xiaoshan_3dtiles/tileset.json",
+        {
+          debugShowBoundingVolume: true, // 优化动态加载
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+
+    viewer.canvas.addEventListener('click', async (event) => {
+      const rect = viewer.canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+
+      const ray = viewer.camera.getPickRay(new Cesium.Cartesian2(x, y));
+      if (!ray) {
+        console.log("⚠️ 无法生成射线");
+        return;
+      }
+
+      const cartographic = Cesium.Cartographic.fromCartesian(ray.origin);
+      const height = cartographic.height;
+      const longitude = Cesium.Math.toDegrees(cartographic.longitude);
+      const latitude = Cesium.Math.toDegrees(cartographic.latitude);
+
+      console.log(`🚀 射线起点坐标：经度=${longitude.toFixed(6)}°, 纬度=${latitude.toFixed(6)}°, 高度=${height.toFixed(2)} 米`);
+
+      console.log('射线方向:', ray.direction);
+
+      // drillPickFromRay 获取射线穿透的所有物体
+      const results = viewer.scene.drillPickFromRay(ray, 10); // 第二个参数限制10个物体
+      if (results.length === 0) {
+        console.log("❌ 射线未穿过任何建筑物");
+        return;
+      }
+
+      let changedCount = 0;
+
+      for (const result of results) {
+        //if (result instanceof Cesium.Cesium3DTileFeature) {
+        // 计算射线与该物体的相交位置
+        const intersection = viewer.scene.pickFromRay(ray, [result]);
+        if (intersection && intersection.position) {
+          const hitPoint = intersection.position;
+          const cameraPosition = viewer.camera.positionWC;
+          const distance = Cesium.Cartesian3.distance(cameraPosition, hitPoint);
+
+          console.log(`📏 相机到该物体的距离: ${distance.toFixed(2)} 米`);
+
+          if (distance < 500) {
+            console.log("🎨 符合条件，修改颜色");
+            result.color = Cesium.Color.BLUE.withAlpha(0.5);
+            changedCount++;
+
+            // 直接改变建筑物颜色（而不是加红点）
+            //result.color = Cesium.Color.BLUE.withAlpha(0.5);
+            // 可视化命中点
+            viewer.entities.add({
+              position: hitPoint,
+              point: {
+                pixelSize: 20,
+                color: Cesium.Color.RED
+              }
+            });
+          } else {
+            console.log("⚠️ 距离大于200m，跳过");
+          }
+        }
+        //}
+      }
+
+      if (changedCount === 0) {
+        console.log("✅ 射线穿透但无建筑物距离<200m");
+      }
+    });
+  </script>
+</body>
+
+</html>
