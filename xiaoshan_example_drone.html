@@ -60,6 +60,8 @@
 
       // 获取射线
       const ray_click = viewer.camera.getPickRay(clickPosition);
+      console.log("点击射线起点:", ray_click.origin);
+      console.log("点击射线方向:", ray_click.direction);
       if (!ray_click) {
         console.log("无法生成射线");
         return;
@@ -167,15 +169,15 @@
         }
       });
 
-      console.log('射线起点:', ray.origin);
+      console.log('无人机射线起点:', ray.origin);
 
       const cartographic = Cesium.Cartographic.fromCartesian(ray.origin);
       const height = cartographic.height;
-      console.log(`射线起点海拔高度: ${height.toFixed(2)} 米`);
-      console.log('射线方向:', ray.direction);
+      console.log(`无人机射线起点海拔高度: ${height.toFixed(2)} 米`);
+      console.log('无人机射线方向:', ray.direction);
 
       // drillPickFromRay 获取射线穿透的所有物体
-      const result = viewer.scene.pickFromRay(ray); // 第二个参数限制10个物体
+      const result = viewer.scene.pickFromRay(ray);
       if (!result) {
         console.log("❌ 射线未穿过任何建筑物");
         return;
