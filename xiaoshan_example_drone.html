@@ -80,12 +80,15 @@
 
       console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
 
+
+      //{longitude_click: 120.40771692106641, latitude_click: 30.167899447194028, height_click: 99.99887779547129}
       // 创建无人机位置
       const dronePositionCartesian = Cesium.Cartesian3.fromDegrees(
         longitude_click,
         latitude_click,
         height_click
       );
+
 
       // 添加无人机实体
       // const droneEntity = viewer.entities.add({
@@ -172,49 +175,49 @@
       console.log('射线方向:', ray.direction);
 
       // drillPickFromRay 获取射线穿透的所有物体
-      const results = viewer.scene.drillPickFromRay(ray, 10); // 第二个参数限制10个物体
-      if (results.length === 0) {
+      const result = viewer.scene.pickFromRay(ray); // 第二个参数限制10个物体
+      if (!result) {
         console.log("❌ 射线未穿过任何建筑物");
         return;
       }
 
       let changedCount = 0;
 
-      for (const result of results) {
-        //if (result instanceof Cesium.Cesium3DTileFeature) {
-        // 计算射线与该物体的相交位置
-        const intersection = viewer.scene.pickFromRay(ray, [result]);
-        if (intersection && intersection.position) {
-          const hitPoint = intersection.position;
-          const cartographicHit = Cesium.Cartographic.fromCartesian(hitPoint);
-          console.log('碰撞点经度:', Cesium.Math.toDegrees(cartographicHit.longitude));
-          console.log('碰撞点纬度:', Cesium.Math.toDegrees(cartographicHit.latitude));
-          console.log('碰撞点高度:', cartographicHit.height);
-          const distance = Cesium.Cartesian3.distance(dronePositionCartesian, hitPoint);
+      // for (const result of results) {
+      //if (result instanceof Cesium.Cesium3DTileFeature) {
+      // 计算射线与该物体的相交位置
+      const intersection = viewer.scene.pickFromRay(ray, [result]);
+      if (intersection && intersection.position) {
+        const hitPoint = intersection.position;
+        const cartographicHit = Cesium.Cartographic.fromCartesian(hitPoint);
+        console.log('碰撞点经度:', Cesium.Math.toDegrees(cartographicHit.longitude));
+        console.log('碰撞点纬度:', Cesium.Math.toDegrees(cartographicHit.latitude));
+        console.log('碰撞点高度:', cartographicHit.height);
+        const distance = Cesium.Cartesian3.distance(dronePositionCartesian, hitPoint);
 
-          console.log(`📏 无人机到该物体的距离: ${distance.toFixed(2)} 米`);
+        console.log(`📏 无人机到该物体的距离: ${distance.toFixed(2)} 米`);
 
-          if (distance < 500) {
-            console.log("🎨 符合条件，修改颜色");
-            result.color = Cesium.Color.BLUE.withAlpha(0.5);
-            changedCount++;
+        if (distance < 500) {
+          console.log("🎨 符合条件，修改颜色");
+          result.color = Cesium.Color.BLUE.withAlpha(0.5);
+          changedCount++;
 
-            // 直接改变建筑物颜色（而不是加红点）
-            //result.color = Cesium.Color.BLUE.withAlpha(0.5);
-            // 可视化命中点
-            viewer.entities.add({
-              position: hitPoint,
-              point: {
-                pixelSize: 50,
-                color: Cesium.Color.RED
-              }
-            });
-          } else {
-            console.log("⚠️ 距离大于200m，跳过");
-          }
+          // 直接改变建筑物颜色（而不是加红点）
+          //result.color = Cesium.Color.BLUE.withAlpha(0.5);
+          // 可视化命中点
+          viewer.entities.add({
+            position: hitPoint,
+            point: {
+              pixelSize: 50,
+              color: Cesium.Color.RED
+            }
+          });
+        } else {
+          console.log("⚠️ 距离大于200m，跳过");
         }
-        //}
       }
+      //}
+      //   }
 
       if (changedCount === 0) {
         console.log("✅ 射线穿透但无建筑物距离<200m");
