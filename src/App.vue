@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import HelloWorld from './components/HelloWorld.vue'
 import CesiumViewer from './components/CesiumViewer.vue'
-import AirPlane from './components/AirPlane.vue'
+import AirPlane_WebSocket from './components/AirPlane_WebSocket.vue'
 </script>
 
 <template>
@@ -14,7 +14,7 @@ import AirPlane from './components/AirPlane.vue'
     </a>
   </div>
   <HelloWorld msg="Vite + Vue" />
-  <AirPlane />
+  <AirPlane_WebSocket />
 </template>
 
 <style scoped>

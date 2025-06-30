@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://localhost:5173/assets/xiaoshan_3dtiles/tileset.json",
+        {
+          debugShowBoundingVolume: true,
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    viewer.zoomTo(tileset);
+
+    viewer.canvas.addEventListener('click', async (event) => {
+      const rect = viewer.canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const clickPosition = new Cesium.Cartesian2(x, y);
+      const ray_click = viewer.camera.getPickRay(clickPosition);
+
+      if (!ray_click) {
+        console.log("无法生成射线");
+        return;
+      }
+
+      const cartesian = viewer.scene.globe.pick(ray_click, viewer.scene);
+      if (!cartesian) {
+        console.log("未点击到地形");
+        return;
+      }
+
+      const cartographic_click = Cesium.Cartographic.fromCartesian(cartesian);
+      const longitude_click = Cesium.Math.toDegrees(cartographic_click.longitude);
+      const latitude_click = Cesium.Math.toDegrees(cartographic_click.latitude);
+      const height_click = cartographic_click.height + 100.0;
+
+      console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
+
+      const dronePositionCartesian = Cesium.Cartesian3.fromDegrees(
+        longitude_click,
+        latitude_click,
+        height_click
+      );
+
+      const airplaneUri = await Cesium.IonResource.fromAssetId(3472138);
+
+      const heading = Cesium.Math.toRadians(-90);
+      const pitch = Cesium.Math.toRadians(0);
+      const roll = Cesium.Math.toRadians(0);
+
+      const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        dronePositionCartesian,
+        hpr
+      );
+
+      const droneEntity = viewer.entities.add({
+        name: "无人机",
+        position: dronePositionCartesian,
+        orientation: orientation,
+        model: {
+          uri: airplaneUri,
+          scale: 5.0,
+          minimumPixelSize: 64
+        }
+      });
+
+      viewer.zoomTo(droneEntity);
+
+      // -----------------------------
+      // ✅ 球体碰撞检测替换开始
+      // -----------------------------
+
+      const droneBoundingSphere = new Cesium.BoundingSphere(dronePositionCartesian, 50); // 10米半径
+      let hitCount = 0;
+
+      // 遍历 tileset 的所有可见 tile
+      tileset.tileVisible.addEventListener((tile) => {
+        const content = tile.content;
+        for (let i = 0; i < content.featuresLength; i++) {
+          const feature = content.getFeature(i);
+
+          const featureSphere = feature.boundingSphere;
+          const distance = Cesium.Cartesian3.distance(
+            droneBoundingSphere.center,
+            featureSphere.center
+          );
+
+          const radiusSum = droneBoundingSphere.radius + featureSphere.radius;
+          console.log(`检测 feature ${i}：距离 ${distance.toFixed(2)}m, 半径和 ${radiusSum.toFixed(2)}m`);
+
+          if (distance < radiusSum) {
+            console.log(`🎯 碰撞：feature 距离 ${distance.toFixed(2)}m`);
+            feature.color = Cesium.Color.BLUE.withAlpha(0.5);
+
+            viewer.entities.add({
+              position: featureSphere.center,
+              point: {
+                pixelSize: 15,
+                color: Cesium.Color.RED
+              }
+            });
+
+            hitCount++;
+          }
+        }
+      });
+
+      if (hitCount === 0) {
+        console.log("✅ 没有检测到碰撞");
+      } else {
+        console.log(`✅ 总共检测到 ${hitCount} 个碰撞对象`);
+      }
+
+      // -----------------------------
+      // ✅ 球体碰撞检测替换结束
+      // -----------------------------
+    });
+  </script>
+</body>
+
+</html>
