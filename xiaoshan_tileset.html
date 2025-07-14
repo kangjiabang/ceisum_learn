@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // Your access token can be found at: https://ion.cesium.com/tokens.
+    // This is the default access token from your ion account
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // currentTileset = viewer.scene.primitives.add(
+    //   await Cesium.Cesium3DTileset.fromUrl(
+    //     `http://localhost:5173/assets/0_0_0-2_1_1/tileset.json`,
+    //     {
+    //       debugShowBoundingVolume: true,
+    //     }
+    //   )
+    // );
+
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        //"assets/xiaoshan_3dtiles/Tile_+000_+005/Tile_+000_+005.json",
+        {
+          debugShowBoundingVolume: true, // 优化动态加载
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+
+    // 监听鼠标点击事件
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+    const infoBox = document.getElementById('infoBox');
+
+    handler.setInputAction(function (movement) {
+      // 获取点击位置的对象
+      const pickedObject = viewer.scene.pick(movement.position);
+
+      if (Cesium.defined(pickedObject)) {
+        // 获取点击的经纬度
+        const cartesian = viewer.camera.pickEllipsoid(movement.position, viewer.scene.globe.ellipsoid);
+        if (Cesium.defined(cartesian)) {
+          const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+          const longitude = Cesium.Math.toDegrees(cartographic.longitude).toFixed(6);
+          const latitude = Cesium.Math.toDegrees(cartographic.latitude).toFixed(6);
+          const height = cartographic.height.toFixed(2);
+
+          // 获取建筑物的 URI
+          const content = pickedObject.content._resource;
+          const uri = content._url || 'Unknown URI';
+
+          // 显示信息
+
+          // 输出信息到控制台
+          console.log(`
+            点击信息：
+            经度: ${longitude}°
+            纬度: ${latitude}°
+            高度: ${height} 米
+            建筑物 URI: ${uri}
+          `);
+        }
+      } else {
+        console.log("未点击到建筑物");
+        // 如果未点击到建筑物，隐藏信息框
+        // infoBox.style.display = 'none';
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+
+  </script>
+</body>
+
+</html>
