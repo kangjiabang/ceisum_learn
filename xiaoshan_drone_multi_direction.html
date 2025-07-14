@@ -184,11 +184,11 @@
         });
         rayEntities.push(rayEntity);
 
-        console.log('无人机射线起点:', ray.origin);
+        //console.log('无人机射线起点:', ray.origin);
 
         const cartographic = Cesium.Cartographic.fromCartesian(ray.origin);
         const height = cartographic.height;
-        console.log(`无人机射线起点海拔高度: ${height.toFixed(2)} 米`);
+        //console.log(`无人机射线起点海拔高度: ${height.toFixed(2)} 米`);
         console.log('无人机射线方向:', ray.direction);
 
         // drillPickFromRay 获取射线穿透的所有物体
@@ -202,12 +202,15 @@
 
         if (hitPoint.position) {
           const cartographicHit = Cesium.Cartographic.fromCartesian(hitPoint.position);
-          console.log('碰撞点经度:', Cesium.Math.toDegrees(cartographicHit.longitude));
-          console.log('碰撞点纬度:', Cesium.Math.toDegrees(cartographicHit.latitude));
-          console.log('碰撞点高度:', cartographicHit.height);
+
           const distance = Cesium.Cartesian3.distance(dronePositionCartesian, hitPoint.position);
 
-          console.log(`📏 无人机到该物体的距离: ${distance.toFixed(2)} 米`);
+          console.log(
+            `📍 碰撞点: 经度=${Cesium.Math.toDegrees(cartographicHit.longitude).toFixed(6)}, ` +
+            `纬度=${Cesium.Math.toDegrees(cartographicHit.latitude).toFixed(6)}, ` +
+            `高度=${cartographicHit.height.toFixed(2)} 米, ` +
+            `距离=${distance.toFixed(2)} 米`
+          );
 
           if (distance < 100) {
             console.log("🎨 符合条件，修改颜色");
