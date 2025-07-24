@@ -15,8 +15,15 @@
 
     Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
 
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
     const viewer = new Cesium.Viewer("cesiumContainer", {
-      shouldDebug: true
+      shouldDebug: true,
+      terrainProvider: terrainProvider
     });
 
     // 存储创建的实体
@@ -39,45 +46,11 @@
     // 定位到 Tileset
     viewer.zoomTo(tileset);
 
+
+
     // 监听鼠标点击事件
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
     const infoBox = document.getElementById('infoBox');
-
-    handler.setInputAction(function (movement) {
-      // 获取点击位置的对象
-      const pickedObject = viewer.scene.pick(movement.position);
-
-      if (Cesium.defined(pickedObject)) {
-        // 获取点击的经纬度
-        const cartesian = viewer.scene.pickPosition(movement.position);
-
-        if (Cesium.defined(cartesian)) {
-          const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-          const longitude = Cesium.Math.toDegrees(cartographic.longitude).toFixed(6);
-          const latitude = Cesium.Math.toDegrees(cartographic.latitude).toFixed(6);
-          const height = cartographic.height.toFixed(2);
-
-          // 获取建筑物的 URI
-          const content = pickedObject.content._resource;
-          const uri = content._url || 'Unknown URI';
-
-          // 显示信息
-
-          // 输出信息到控制台
-          console.log(`
-            点击信息：
-            经度: ${longitude}°
-            纬度: ${latitude}°
-            高度: ${height} 米
-            建筑物 URI: ${uri}
-          `);
-        }
-      } else {
-        console.log("未点击到建筑物");
-        // 如果未点击到建筑物，隐藏信息框
-        // infoBox.style.display = 'none';
-      }
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     viewer.canvas.addEventListener('click', async (event) => {
       // 清除之前的无人机和射线
@@ -106,11 +79,32 @@
       }
 
       const cartographic_click = Cesium.Cartographic.fromCartesian(cartesian);
-      const longitude_click = Cesium.Math.toDegrees(cartographic_click.longitude).toFixed(6);
-      const latitude_click = Cesium.Math.toDegrees(cartographic_click.latitude).toFixed(6);
-      const height_click = cartographic_click.height.toFixed(2);
+      // const longitude_click = Cesium.Math.toDegrees(cartographic_click.longitude).toFixed(6);
+      // const latitude_click = Cesium.Math.toDegrees(cartographic_click.latitude).toFixed(6);
+      // const height_click = cartographic_click.height.toFixed(2) + 500;
+
+      const longitude_click = 119.9980574;
+      const latitude_click = 30.28275965;
+      const height_click = 300;
 
       console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
+
+      // 获取地形高度
+      const terrainSample = await Cesium.sampleTerrainMostDetailed(
+        viewer.terrainProvider,
+        [new Cesium.Cartographic(
+          Cesium.Math.toRadians(longitude_click),
+          Cesium.Math.toRadians(latitude_click)
+        )]
+      );
+
+      if (!terrainSample || terrainSample.length === 0) {
+        console.error("无法获取地形高度");
+        return;
+      }
+
+      // 2. 获取地形高度
+      const terrainHeight = terrainSample[0].height;
 
       // 创建无人机位置
       const dronePositionCartesian = Cesium.Cartesian3.fromDegrees(
@@ -147,11 +141,6 @@
 
       // 方法2：多方向射线检测（补充方案）
       const directions = [
-        Cesium.Cartesian3.UNIT_X,   // 右
-        Cesium.Cartesian3.UNIT_Y,   // 前
-        Cesium.Cartesian3.UNIT_Z,  // 上
-        Cesium.Cartesian3.negate(Cesium.Cartesian3.UNIT_X, new Cesium.Cartesian3()), // 左
-        Cesium.Cartesian3.negate(Cesium.Cartesian3.UNIT_Y, new Cesium.Cartesian3()), // 后
         Cesium.Cartesian3.negate(Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3())  // 下
       ];
 
@@ -204,11 +193,18 @@
 
           const distance = Cesium.Cartesian3.distance(dronePositionCartesian, hitPoint.position);
 
+
+          // 5. 计算建筑物高度
+          const buildingHeight = Math.max(0, cartographicHit.height - terrainHeight).toFixed(2);
+
+
           console.log(
             `📍 碰撞点: 经度=${Cesium.Math.toDegrees(cartographicHit.longitude).toFixed(6)}, ` +
             `纬度=${Cesium.Math.toDegrees(cartographicHit.latitude).toFixed(6)}, ` +
-            `高度=${cartographicHit.height.toFixed(2)} 米, ` +
+            `地形高度=${terrainHeight.toFixed(2)} 米, ` +
+            `建筑物高度=${buildingHeight} 米, ` +
             `距离=${distance.toFixed(2)} 米`
+
           );
 
           if (distance < 100) {

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // Your access token can be found at: https://ion.cesium.com/tokens.  
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    // 存储创建的实体
+    let droneEntity = null;
+    let rayEntities = [];
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        {
+          debugShowBoundingVolume: true,
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+    // 生成垂直向下的射线方向（局部坐标系）
+    function getLocalDownDirection(position) {
+      // 获取位置的局部东北天(ENU)坐标系
+      const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+
+      // 从ENU矩阵中提取"下"方向（ENU中的Down是-Z轴）
+      const downDirection = new Cesium.Cartesian3();
+      Cesium.Matrix4.multiplyByPointAsVector(
+        enuMatrix,
+        new Cesium.Cartesian3(0, 0, -1),
+        downDirection
+      );
+
+      Cesium.Cartesian3.normalize(downDirection, downDirection);
+      return downDirection;
+    }
+
+    // 生成锥形分布的射线
+    function generateConeRays(origin, rayCount = 12, coneAngle = 30) {
+      const rays = [];
+
+      // 获取局部坐标系的"下"方向
+      const localDown = getLocalDownDirection(origin);
+
+      // 获取局部坐标系的变换矩阵
+      const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+      const inverseEnuMatrix = Cesium.Matrix4.inverse(enuMatrix, new Cesium.Matrix4());
+
+      if (rayCount === 1) {
+        // 只生成一个垂直向下的射线
+        rays.push({
+          direction: localDown,
+          isCenterRay: true
+        });
+        return rays;
+      }
+
+      // 生成锥形射线
+      for (let i = 0; i < rayCount; i++) {
+        if (i === 0) {
+          // 中心射线：垂直向下
+          rays.push({
+            direction: localDown,
+            horizontalAngle: 0,
+            verticalAngle: 0,
+            isCenterRay: true
+          });
+        } else {
+          // 锥形周围的射线
+          const surroundingRays = rayCount - 1;
+          const index = i - 1;
+
+          const horizontalAngle = (index / surroundingRays) * 2 * Math.PI;
+          const coneAngleRad = Cesium.Math.toRadians(coneAngle);
+
+          // 在局部ENU坐标系中计算方向
+          const x = Math.sin(coneAngleRad) * Math.cos(horizontalAngle); // 东向分量
+          const y = Math.sin(coneAngleRad) * Math.sin(horizontalAngle); // 北向分量
+          const z = -Math.cos(coneAngleRad); // 下向分量（负号表示向下）
+
+          // 转换到世界坐标系
+          const localDirection = new Cesium.Cartesian3(x, y, z);
+          const worldDirection = new Cesium.Cartesian3();
+
+          Cesium.Matrix4.multiplyByPointAsVector(enuMatrix, localDirection, worldDirection);
+          Cesium.Cartesian3.normalize(worldDirection, worldDirection);
+
+          rays.push({
+            direction: worldDirection,
+            horizontalAngle: Cesium.Math.toDegrees(horizontalAngle),
+            verticalAngle: coneAngle,
+            isCenterRay: false
+          });
+        }
+      }
+
+      return rays;
+    }
+
+    viewer.canvas.addEventListener('click', async (event) => {
+      try {
+        // 清除之前的无人机和射线
+        if (droneEntity) {
+          viewer.entities.remove(droneEntity);
+          droneEntity = null;
+        }
+
+        // 清除之前的射线实体
+        rayEntities.forEach(entity => {
+          viewer.entities.remove(entity);
+        });
+        rayEntities = [];
+
+        // 使用固定的建筑物中心点坐标
+        const longitude_click = 119.9980574;
+        const latitude_click = 30.28275965;
+        const height_click = 300;
+
+        console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
+
+        // 获取地形高度
+        const terrainSample = await Cesium.sampleTerrainMostDetailed(
+          viewer.terrainProvider,
+          [new Cesium.Cartographic(
+            Cesium.Math.toRadians(longitude_click),
+            Cesium.Math.toRadians(latitude_click)
+          )]
+        );
+
+        if (!terrainSample || terrainSample.length === 0) {
+          console.error("无法获取地形高度");
+          return;
+        }
+
+        // 获取地形高度
+        const terrainHeight = terrainSample[0].height;
+        console.log("地形高度:", terrainHeight.toFixed(2), "米");
+
+        // 创建无人机位置
+        const dronePositionCartesian = Cesium.Cartesian3.fromDegrees(
+          longitude_click,
+          latitude_click,
+          height_click
+        );
+
+        // 获取无人机模型
+        const airplaneUri = await Cesium.IonResource.fromAssetId(3472138);
+
+        const heading = Cesium.Math.toRadians(-90); // 水平方向偏转90度
+        const pitch = Cesium.Math.toRadians(0);    // 俯仰角 0 度
+        const roll = Cesium.Math.toRadians(0);     // 滚转角 0 度
+
+        const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
+        const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+          dronePositionCartesian,
+          hpr
+        );
+
+        // 创建新的无人机实体
+        droneEntity = viewer.entities.add({
+          name: "无人机",
+          position: dronePositionCartesian,
+          orientation: orientation,
+          model: {
+            uri: airplaneUri,
+            scale: 5.0,
+            minimumPixelSize: 64
+          }
+        });
+
+        // 视角聚焦到无人机
+        viewer.zoomTo(droneEntity, new Cesium.HeadingPitchRange(
+          Cesium.Math.toRadians(-90),
+          Cesium.Math.toRadians(-15),
+          2000
+        ));
+
+        // 生成锥形射线（垂直向下为中心）
+        const coneRays = generateConeRays(dronePositionCartesian, 6, 5); // 9条射线，45度锥形角
+
+        let collisionDetected = false;
+
+        // 处理每条射线
+        coneRays.forEach((rayInfo, rayIndex) => {
+          const ray = new Cesium.Ray(dronePositionCartesian, rayInfo.direction);
+
+          // 可视化射线
+          const rayEntity = viewer.entities.add({
+            name: `射线_${rayIndex}`,
+            polyline: {
+              positions: [
+                dronePositionCartesian,
+                Cesium.Cartesian3.add(
+                  dronePositionCartesian,
+                  Cesium.Cartesian3.multiplyByScalar(
+                    rayInfo.direction,
+                    500, // 射线长度
+                    new Cesium.Cartesian3()
+                  ),
+                  new Cesium.Cartesian3()
+                )
+              ],
+              width: rayInfo.isCenterRay ? 3 : 2,
+              material: rayInfo.isCenterRay ?
+                new Cesium.PolylineOutlineMaterialProperty({
+                  color: Cesium.Color.RED,
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 1
+                }) :
+                new Cesium.PolylineGlowMaterialProperty({
+                  color: Cesium.Color.BLUE.withAlpha(0.7),
+                  glowPower: 0.1
+                })
+            }
+          });
+          rayEntities.push(rayEntity);
+
+          // 射线检测
+          const hitPoint = viewer.scene.pickFromRay(ray);
+          if (!hitPoint) {
+            console.log(`❌ 射线${rayIndex}未穿过任何物体`);
+            return;
+          }
+
+          if (hitPoint.position) {
+            const cartographicHit = Cesium.Cartographic.fromCartesian(hitPoint.position);
+            const distance = Cesium.Cartesian3.distance(dronePositionCartesian, hitPoint.position);
+
+            // 计算建筑物高度
+            const buildingHeight = Math.max(0, cartographicHit.height - terrainHeight);
+
+            console.log(
+              `📍 射线${rayIndex}碰撞点: 经度=${Cesium.Math.toDegrees(cartographicHit.longitude).toFixed(6)}, ` +
+              `纬度=${Cesium.Math.toDegrees(cartographicHit.latitude).toFixed(6)}, ` +
+              `地形高度=${terrainHeight.toFixed(2)}米, ` +
+              `碰撞点高度=${cartographicHit.height.toFixed(2)}米, ` +
+              `建筑物高度=${buildingHeight.toFixed(2)}米, ` +
+              `距离=${distance.toFixed(2)}米`
+            );
+
+            if (distance < 500) { // 扩大检测范围
+              console.log(`🎨 射线${rayIndex}检测到近距离物体`);
+
+              // 可视化命中点
+              const hitEntity = viewer.entities.add({
+                name: `碰撞点_${rayIndex}`,
+                position: hitPoint.position,
+                point: {
+                  pixelSize: rayInfo.isCenterRay ? 30 : 20,
+                  color: distance < 100 ? Cesium.Color.RED :
+                    distance < 200 ? Cesium.Color.ORANGE : Cesium.Color.YELLOW,
+                  outlineColor: Cesium.Color.WHITE,
+                  outlineWidth: 2
+                },
+                label: {
+                  text: `高度: ${buildingHeight.toFixed(1)}m\n距离: ${distance.toFixed(1)}m`,
+                  font: '12px sans-serif',
+                  fillColor: Cesium.Color.WHITE,
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 2,
+                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                  pixelOffset: new Cesium.Cartesian2(0, -30)
+                }
+              });
+              rayEntities.push(hitEntity);
+
+              collisionDetected = true;
+            } else {
+              console.log(`⚠️ 射线${rayIndex}距离大于500m，跳过`);
+            }
+          }
+        });
+
+        if (!collisionDetected) {
+          console.log("✅ 未检测到近距离障碍物");
+        }
+
+      } catch (error) {
+        console.error("处理过程中出错:", error);
+      }
+    });
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    #cesiumContainer {
+      width: 100%;
+      height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // 主执行函数
+    async function main() {
+      try {
+        // 加载3D Tileset
+        const tileset = await Cesium.Cesium3DTileset.fromUrl(
+          "http://192.168.4.78:8000/tileset.json",
+          {
+            debugShowBoundingVolume: true,
+          }
+        );
+
+        viewer.scene.primitives.add(tileset);
+
+        tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+          console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+        });
+
+        // 等待tileset完全加载
+        await tileset.readyPromise;
+
+        // 定位到Tileset
+        viewer.zoomTo(tileset);
+
+        // 调用提取基底面函数
+        const footprints = await extractBuildingFootprints(tileset);
+
+        // 可视化基底面
+        footprints.forEach(footprint => {
+          viewer.entities.add({
+            polygon: {
+              hierarchy: new Cesium.PolygonHierarchy(footprint.positions),
+              material: Cesium.Color.RED.withAlpha(0.5),
+              height: 0,
+              extrudedHeight: 0.1,
+              outline: true,
+              outlineColor: Cesium.Color.RED
+            }
+          });
+        });
+
+      } catch (error) {
+        console.error("发生错误:", error);
+      }
+    }
+
+    // 获取建筑物基底面的函数
+    async function extractBuildingFootprints(tileset) {
+      const footprints = [];
+
+      // 使用Cesium的tile可见性系统
+      const visibleTiles = [];
+      viewer.scene.globe.tileLoadProgressEvent.addEventListener(() => {
+        tileset._tilesToRender.forEach(tile => {
+          if (tile.content && !visibleTiles.includes(tile)) {
+            visibleTiles.push(tile);
+          }
+        });
+      });
+
+      // 处理可见tile
+      for (const tile of visibleTiles) {
+        try {
+          await tile.contentReadyPromise;
+          if (tile.content && tile.content.featuresLength > 0) {
+            const footprint = sampleFootprint(tileset, tile.content.boundingVolume.boundingSphere);
+            if (footprint) footprints.push(footprint);
+          }
+        } catch (error) {
+          console.warn("处理tile时出错:", error);
+        }
+      }
+
+      return footprints;
+    }
+
+    // 采样基底面轮廓
+    function sampleFootprint(tileset, boundingSphere) {
+      const center = boundingSphere.center;
+      const radius = boundingSphere.radius;
+      const positions = [];
+
+      // 在底部平面创建采样网格
+      const samples = 20;
+      const step = (radius * 2) / samples;
+
+      for (let x = -radius; x <= radius; x += step) {
+        for (let z = -radius; z <= radius; z += step) {
+          const samplePoint = Cesium.Cartesian3.add(
+            center,
+            new Cesium.Cartesian3(x, 0, z),
+            new Cesium.Cartesian3()
+          );
+
+          // 向下发射射线检测碰撞
+          const ray = new Cesium.Ray(
+            samplePoint,
+            Cesium.Cartesian3.negate(Cesium.Cartesian3.UNIT_Y, new Cesium.Cartesian3())
+          );
+
+          const intersection = viewer.scene.pickFromRay(ray);
+          if (intersection && intersection.id === tileset) {
+            positions.push(samplePoint);
+          }
+        }
+      }
+
+      if (positions.length > 3) {
+        return {
+          positions: positions,
+          center: center
+        };
+      }
+
+      return null;
+    }
+
+    // 启动主函数
+    main();
+  </script>
+</body>
+
+</html>

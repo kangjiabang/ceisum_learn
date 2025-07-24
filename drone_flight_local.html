@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <style>
+    #cesiumContainer {
+      width: 100%;
+      height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer">
+  </div>
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+
+    import * as Cesium from 'cesium';
+    import DronePath from './src/utils/index.js';
+
+    // 初始化Cesium Viewer
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      skyAtmosphere: false,
+    });
+
+
+    // 创建DronePath实例
+    const dronePath = new DronePath(viewer, {
+      modelAssetId: 3472138, // 可选: 自定义模型ID
+      segmentPoints: 10,     // 可选: 插值点数
+      pointInterval: 2       // 可选: 点间隔时间
+    });
+
+    // 定义航点
+    const waypoints = [
+      { lon: 120.712, lat: 31.326, alt: 100 },
+      { lon: 120.714, lat: 31.328, alt: 150 },
+      { lon: 120.716, lat: 31.327, alt: 200 },
+      { lon: 120.718, lat: 31.329, alt: 250 },
+      { lon: 120.720, lat: 31.326, alt: 300 },
+    ];
+
+    // 创建飞行路径
+    await dronePath.createFlightPath(waypoints, {
+      name: "我的无人机",
+      showPath: true,
+      pathColor: Cesium.Color.YELLOW.withAlpha(0.7)
+    });
+
+    await dronePath.startFlight();
+
+    // 2. 创建空域障碍物
+    // 在无人机路径上选择一个会碰撞的点（例如第三个航点）
+    const collisionPoint = waypoints[2]; // { lon: 120.716, lat: 31.327, alt: 200 }
+
+    // 创建一定会碰撞的圆柱体禁飞区
+    const noFlyZone = viewer.entities.add({
+      name: "禁飞区",
+      position: Cesium.Cartesian3.fromDegrees(
+        collisionPoint.lon,
+        collisionPoint.lat,
+        collisionPoint.alt
+      ),
+      cylinder: {
+        length: 300,          // 高度300米（覆盖无人机飞行高度）
+        topRadius: 0,         // 顶部半径为0（圆锥形）
+        bottomRadius: 500,    // 底部半径500米（确保完全覆盖路径）
+        material: Cesium.Color.RED.withAlpha(0.3),
+        outline: true,
+        outlineColor: Cesium.Color.RED,
+        outlineWidth: 2
+      }
+    });
+    // 3. 启用碰撞检测
+    dronePath.enableAirspaceCollisionDetection(
+      [noFlyZone],
+      {
+        warningDistance: 100,  // 100米开始预警
+        collisionDistance: 30  // 30米判定碰撞
+      }
+    );
+
+    // 4. 监听碰撞事件
+    dronePath.onCollision = (drone, obstacle) => {
+      console.log(`无人机与 ${obstacle.name} 发生碰撞！`);
+      // 可以暂停动画等操作
+      viewer.clock.shouldAnimate = false;
+    };
+
+    // await dronePath.createFlightPath(waypoints, viewer, {
+    //   name: "我的无人机2",
+    //   showPath: true,
+    //   pathColor: Cesium.Color.YELLOW.withAlpha(0.7)
+    // });
+
+    // await dronePath.createFlightPath(waypoints, viewer, {
+    //   name: "我的无人机3",
+    //   showPath: true,
+    //   pathColor: Cesium.Color.YELLOW.withAlpha(0.7)
+    // });
+
+    // 添加空域
+    // dronePath.createAirspace('cylinder', {
+    //   position: [120.716, 31.328],
+    //   length: 500,
+    //   radius: 2000,
+    //   color: Cesium.Color.RED.withAlpha(0.3)
+    // });
+    // 设置时间轴
+    // 基于时间插值：每个点间隔 2 秒
+
+  </script>
+</body>
+
+
+
+</html>

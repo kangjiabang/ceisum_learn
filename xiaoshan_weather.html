@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js "></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css " rel="stylesheet">
+  <style>
+    #cesiumContainer {
+      width: 100%;
+      height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script>
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // 存储创建的实体
+    let droneEntity = null;
+    let rayEntities = [];
+
+    // 定义一个异步函数来加载 3D Tileset
+    async function loadTileset() {
+      try {
+        const tileset = viewer.scene.primitives.add(
+          await Cesium.Cesium3DTileset.fromUrl(
+            "http://192.168.4.78:8000/tileset.json",
+            {
+              debugShowBoundingVolume: true, // 优化动态加载
+            }
+          )
+        );
+
+        tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+          console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+        });
+
+        // 定位到 Tileset
+        viewer.zoomTo(tileset);
+      } catch (error) {
+        console.error("加载 3D Tileset 失败:", error);
+      }
+    }
+
+    // 调用异步函数
+    loadTileset();
+
+    function computeEmitterModelMatrix(viewer) {
+      const camera = viewer.camera;
+      const center = Cesium.Cartesian3.clone(camera.position);
+      return Cesium.Transforms.eastNorthUpToFixedFrame(center);
+    }
+
+    viewer.scene.primitives.add(new Cesium.ParticleSystem({
+      image: 'https://i.imgur.com/VZfb6nD.png',
+      startColor: Cesium.Color.WHITE.withAlpha(0.6),
+      endColor: Cesium.Color.WHITE.withAlpha(0.0),
+      startScale: 1.0,
+      endScale: 0.0,
+      minimumSpeed: 10.0,
+      maximumSpeed: 20.0,
+      lifetime: 1.5,
+      emissionRate: 8000,
+      imageSize: new Cesium.Cartesian2(2.0, 15.0),
+      emitter: new Cesium.CircleEmitter(100.0),
+      modelMatrix: computeEmitterModelMatrix(viewer),
+      updateCallback: function (particle, dt) {
+        Cesium.Cartesian3.multiplyByScalar(particle.velocity, dt, particle.position);
+      }
+    }));
+
+    viewer.scene.fog.enabled = true;
+    viewer.scene.fog.density = 0.0015;
+  </script>
+</body>
+
+</html>
