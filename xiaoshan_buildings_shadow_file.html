@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      terrainProvider: terrainProvider
+    });
+
+    // 加载 3D Tileset
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        { debugShowBoundingVolume: true }
+      )
+    );
+    viewer.zoomTo(tileset);
+
+    // 解析 WKT 多边形坐标
+    function parseWKTCoordinates(wkt) {
+      try {
+        // 移除可能的引号
+        const cleanWkt = wkt.replace(/^"|"$/g, '').trim();
+        console.log('解析WKT:', cleanWkt);
+
+        const match = cleanWkt.match(/\(\(\(([^)]+)\)\)\)/);
+        if (!match) {
+          console.warn('无法解析 WKT 格式:', cleanWkt);
+          return null;
+        }
+
+        const coordsStr = match[1];
+        const coordPairs = coordsStr.split(',');
+        const coordinates = [];
+
+        for (let pair of coordPairs) {
+          const trimmedPair = pair.trim();
+          if (trimmedPair) {
+            const [lonStr, latStr] = trimmedPair.split(' ');
+            const lon = parseFloat(lonStr);
+            const lat = parseFloat(latStr);
+
+            // 验证坐标是否有效
+            if (!isNaN(lon) && !isNaN(lat) && isFinite(lon) && isFinite(lat)) {
+              coordinates.push(lon, lat);
+            } else {
+              console.warn('无效坐标:', lonStr, latStr);
+              return null;
+            }
+          }
+        }
+
+        // 确保坐标数组长度为偶数且不为空
+        if (coordinates.length === 0 || coordinates.length % 2 !== 0) {
+          console.warn('坐标数组长度不正确:', coordinates);
+          return null;
+        }
+
+        console.log('成功解析坐标:', coordinates);
+        return coordinates;
+      } catch (error) {
+        console.error('解析 WKT 坐标时出错:', error);
+        return null;
+      }
+    }
+
+    // 计算多边形中心点
+    function calculateCenter(coordinates) {
+      if (!coordinates || coordinates.length < 4) return null;
+
+      let lonSum = 0, latSum = 0;
+      const pointCount = coordinates.length / 2;
+
+      for (let i = 0; i < coordinates.length; i += 2) {
+        lonSum += coordinates[i];
+        latSum += coordinates[i + 1];
+      }
+
+      return {
+        lon: lonSum / pointCount,
+        lat: latSum / pointCount
+      };
+    }
+
+    // 清理CSV字段值（移除引号）
+    function cleanCSVValue(value) {
+      if (typeof value === 'string') {
+        return value.replace(/^"|"$/g, '').trim();
+      }
+      return value;
+    }
+
+    // 加载并渲染建筑物数据
+    async function loadBuildingsFromCSV(url) {
+      try {
+        const response = await fetch(url);
+        const text = await response.text();
+        const lines = text.trim().split('\n');
+
+        console.log(`开始加载 ${lines.length} 个建筑物...`);
+
+        const buildingEntities = [];
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          console.log(`处理第 ${i + 1} 行:`, line);
+
+          try {
+            // 解析 CSV 行（处理带引号的情况）
+            const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            if (parts.length < 2) {
+              console.warn(`第 ${i + 1} 行数据格式不正确:`, line);
+              errorCount++;
+              continue;
+            }
+
+            const wkt = cleanCSVValue(parts[0]);
+            const heightStr = cleanCSVValue(parts[1]);
+            const height = parseFloat(heightStr);
+
+            console.log(`解析高度: "${heightStr}" -> ${height}`);
+
+            // 验证高度
+            if (isNaN(height) || !isFinite(height)) {
+              console.warn(`第 ${i + 1} 行高度无效:`, heightStr);
+              errorCount++;
+              continue;
+            }
+
+            // 解析坐标
+            const coordinates = parseWKTCoordinates(wkt);
+            if (!coordinates) {
+              console.warn(`第 ${i + 1} 行坐标解析失败:`, wkt);
+              errorCount++;
+              continue;
+            }
+
+            // 计算中心点
+            const center = calculateCenter(coordinates);
+            if (!center) {
+              console.warn(`第 ${i + 1} 行无法计算中心点`);
+              errorCount++;
+              continue;
+            }
+
+            console.log(`建筑物中心点:`, center);
+
+            // 获取地形高度
+            const cartographic = new Cesium.Cartographic(
+              Cesium.Math.toRadians(center.lon),
+              Cesium.Math.toRadians(center.lat)
+            );
+
+            try {
+              const [terrainSample] = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [cartographic]);
+              const terrainHeight = terrainSample && !isNaN(terrainSample.height) && isFinite(terrainSample.height)
+                ? terrainSample.height
+                : 0;
+
+              const bottomHeight = Math.max(0, terrainHeight); // 确保不为负数
+              const topHeight = bottomHeight + height;
+
+              console.log(`地形高度: ${terrainHeight}, 建筑物高度: ${height}, 总高度: ${topHeight}`);
+
+              // 创建建筑物实体
+              const entity = viewer.entities.add({
+                name: `Building_${i + 1}`,
+                polygon: {
+                  hierarchy: Cesium.Cartesian3.fromDegreesArray(coordinates),
+                  extrudedHeight: topHeight,
+                  height: bottomHeight,
+                  material: Cesium.Color.BLUE.withAlpha(0.6),
+                  outline: true,
+                  outlineColor: Cesium.Color.RED,
+                  closeTop: true,
+                  closeBottom: true
+                }
+              });
+
+              buildingEntities.push(entity);
+              successCount++;
+
+              console.log(`成功创建建筑物 ${i + 1}`);
+
+            } catch (terrainError) {
+              console.warn(`第 ${i + 1} 行获取地形高度失败:`, terrainError);
+              // 即使地形获取失败，也创建建筑物（使用0作为地形高度）
+              const entity = viewer.entities.add({
+                name: `Building_${i + 1}`,
+                polygon: {
+                  hierarchy: Cesium.Cartesian3.fromDegreesArray(coordinates),
+                  extrudedHeight: height,
+                  height: 0,
+                  material: Cesium.Color.BLUE.withAlpha(0.6),
+                  outline: true,
+                  outlineColor: Cesium.Color.RED,
+                  closeTop: true,
+                  closeBottom: true
+                }
+              });
+              buildingEntities.push(entity);
+              successCount++;
+            }
+
+          } catch (error) {
+            console.error(`处理第 ${i + 1} 行时出错:`, error);
+            errorCount++;
+          }
+        }
+
+        console.log(`建筑物加载完成: 成功 ${successCount} 个, 失败 ${errorCount} 个`);
+
+        // 飞行到第一个建筑物
+        if (buildingEntities.length > 0) {
+          viewer.flyTo(buildingEntities, {
+            duration: 2.0
+          });
+        }
+
+      } catch (error) {
+        console.error('加载建筑物数据时出错:', error);
+      }
+    }
+
+    // 启动加载
+    loadBuildingsFromCSV('./buildings.csv');
+  </script>
+</body>
+
+</html>

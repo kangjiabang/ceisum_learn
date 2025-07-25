@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // Your access token can be found at: https://ion.cesium.com/tokens.    
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    // 存储创建的实体
+    let droneEntity = null;
+    let rayEntities = [];
+    let buildingEntity = null; // 存储建筑物实体
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        {
+          debugShowBoundingVolume: true,
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      //console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+    viewer.canvas.addEventListener('click', async (event) => {
+      try {
+        // 清除之前的无人机和射线
+        if (droneEntity) {
+          viewer.entities.remove(droneEntity);
+          droneEntity = null;
+        }
+
+        // 清除之前的射线实体
+        rayEntities.forEach(entity => {
+          viewer.entities.remove(entity);
+        });
+        rayEntities = [];
+
+        // 清除之前的建筑物实体
+        if (buildingEntity) {
+          viewer.entities.remove(buildingEntity);
+          buildingEntity = null;
+        }
+
+
+        // 使用固定的建筑物中心点坐标 (用于无人机)
+        // 注意：这和你要创建的建筑物坐标不同
+        const longitude_click = 119.993779;
+        const latitude_click = 30.283050;
+        const height_click = 300;
+
+        console.log("点击坐标（用于无人机）:", { longitude_click, latitude_click, height_click });
+
+        // --- 创建建筑物实体 ---
+        // 你的建筑物 MULTIPOLYGON 数据
+        const polygonWkt = "MULTIPOLYGON(((119.9934527 30.2831678,119.9939089 30.2832781,119.9939901 30.2832941,119.9941017 30.2829358,119.9935789 30.2828015,119.9934527 30.2831678)))";
+        const buildingHeight = 300.0; // 建筑物本身的高度为 20 米
+
+        // --- 解析 WKT ---
+        const match = polygonWkt.match(/\(\(\(([^)]+)\)\)\)/);
+        if (!match) {
+          throw new Error("无法解析 MULTIPOLYGON WKT");
+        }
+        const coordString = match[1];
+        const coordPairs = coordString.split(',');
+
+        const coordinates = [];
+        for (let i = 0; i < coordPairs.length; i++) {
+          const [lon, lat] = coordPairs[i].trim().split(' ').map(Number);
+          coordinates.push(lon, lat);
+        }
+
+        // --- 计算多边形中心点用于获取地形高度 ---
+        let lonSum = 0, latSum = 0;
+        for (let i = 0; i < coordinates.length; i += 2) {
+          lonSum += coordinates[i];
+          latSum += coordinates[i + 1];
+        }
+        const centerLon = lonSum / (coordinates.length / 2);
+        const centerLat = latSum / (coordinates.length / 2);
+        console.log(`建筑物多边形中心点: (${centerLon.toFixed(6)}, ${centerLat.toFixed(6)})`);
+
+        // --- 获取建筑物中心点的地形高度 ---
+        const terrainSample = await Cesium.sampleTerrainMostDetailed(
+          viewer.terrainProvider,
+          [new Cesium.Cartographic(
+            Cesium.Math.toRadians(centerLon),
+            Cesium.Math.toRadians(centerLat)
+          )]
+        );
+
+        const buildingTerrainHeight = terrainSample && terrainSample.length > 0 ? terrainSample[0].height : 0;
+        console.log("建筑物区域地形高度:", buildingTerrainHeight.toFixed(2), "米");
+
+
+        // --- 基于地形高度设置建筑物的底部和顶部 ---
+        const bottomHeight = buildingTerrainHeight; // 建筑物底部贴地
+        const topHeight = bottomHeight + buildingHeight; // 建筑物顶部高度
+
+        console.log(`建筑物高度设置: 底部=${bottomHeight.toFixed(2)}m, 顶部=${topHeight.toFixed(2)}m`);
+
+
+        // --- 创建挤出的多边形实体 ---
+        buildingEntity = viewer.entities.add({
+          name: 'Extruded Building',
+          polygon: {
+            hierarchy: Cesium.Cartesian3.fromDegreesArray(coordinates),
+            extrudedHeight: topHeight,     // 顶部海拔高度
+            height: bottomHeight,          // 底部海拔高度
+            material: Cesium.Color.BLUE.withAlpha(0.7), // 蓝色半透明
+            outline: true,
+            outlineColor: Cesium.Color.RED,
+            outlineWidth: 2,
+            // 确保顶部和底部封闭
+            closeTop: true,
+            closeBottom: true
+          }
+        });
+        console.log("✅ 建筑物实体已创建");
+
+
+        // --- 将相机移动到建筑物附近 ---
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, topHeight + 100.0), // 在建筑物上方一点
+          orientation: {
+            heading: Cesium.Math.toRadians(0.0),
+            pitch: Cesium.Math.toRadians(-45.0),
+            roll: 0.0
+          },
+          duration: 2.0 // 飞行时间2秒
+        });
+        console.log("📷 相机正在飞往建筑物...");
+
+
+
+      } catch (error) {
+        console.error("处理过程中出错:", error);
+      }
+    });
+  </script>
+</body>
+
+</html>
