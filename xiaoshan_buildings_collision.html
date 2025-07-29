@@ -351,13 +351,31 @@
 
         if (matchedEntity) {
           console.log("找到匹配的建筑物实体:", matchedEntity);
-
+          let lastChange = 0;
           // 应用闪烁效果
           matchedEntity.polygon.material = new Cesium.ColorMaterialProperty(
             new Cesium.CallbackProperty(function (time) {
-              const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 300); // 300ms周期
-              return Cesium.Color.RED.withAlpha(alpha);
+              const now = Date.now();
+
+              // 每100ms有30%几率触发"故障"
+              if (now - lastChange > 100 && Math.random() < 0.3) {
+                lastChange = now;
+                return Cesium.Color.fromRandom({
+                  alpha: 0.8,
+                  minimumRed: 0.7,
+                  maximumRed: 1.0,
+                  minimumGreen: 0.0,
+                  maximumGreen: 0.3,
+                  minimumBlue: 0.7,
+                  maximumBlue: 1.0
+                });
+              }
+
+              // 正常状态下的呼吸灯效果
+              const pulse = 0.5 + 0.5 * Math.sin(now / 300);
+              return new Cesium.Color(1.0, pulse, 0.3, 0.8);
             }, false)
+
           );
 
           // 飞到这个建筑物

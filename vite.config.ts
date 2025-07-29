@@ -7,5 +7,5 @@ export default defineConfig({
   plugins: [vue(), cesium()],
   build: {
     sourcemap: true // 关键配置
-  }
+  },
 })

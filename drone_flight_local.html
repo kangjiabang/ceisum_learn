@@ -36,7 +36,7 @@
 
     // 定义航点
     const waypoints = [
-      { lon: 120.712, lat: 31.326, alt: 100 },
+      { lon: 120.712, lat: 31.320, alt: 100 },
       { lon: 120.714, lat: 31.328, alt: 150 },
       { lon: 120.716, lat: 31.327, alt: 200 },
       { lon: 120.718, lat: 31.329, alt: 250 },
@@ -57,28 +57,71 @@
     const collisionPoint = waypoints[2]; // { lon: 120.716, lat: 31.327, alt: 200 }
 
     // 创建一定会碰撞的圆柱体禁飞区
-    const noFlyZone = viewer.entities.add({
-      name: "禁飞区",
+    // const noFlyZone = viewer.entities.add({
+    //   name: "禁飞区",
+    //   position: Cesium.Cartesian3.fromDegrees(
+    //     collisionPoint.lon,
+    //     collisionPoint.lat,
+    //     collisionPoint.alt
+    //   ),
+    //   cylinder: {
+    //     length: 300,          // 高度300米（覆盖无人机飞行高度）
+    //     topRadius: 0,         // 顶部半径为0（圆锥形）
+    //     bottomRadius: 500,    // 底部半径500米（确保完全覆盖路径）
+    //     material: Cesium.Color.RED.withAlpha(0.3),
+    //     outline: true,
+    //     outlineColor: Cesium.Color.RED,
+    //     outlineWidth: 2
+    //   }
+    // });
+
+    const noFlyZoneEllipse = viewer.entities.add({
+      name: "原型禁飞区",
+      customType: 'circle',
       position: Cesium.Cartesian3.fromDegrees(
         collisionPoint.lon,
         collisionPoint.lat,
         collisionPoint.alt
       ),
-      cylinder: {
-        length: 300,          // 高度300米（覆盖无人机飞行高度）
-        topRadius: 0,         // 顶部半径为0（圆锥形）
-        bottomRadius: 500,    // 底部半径500米（确保完全覆盖路径）
+      ellipse: {  // 使用椭圆（圆形）表示平面禁飞区
+        semiMajorAxis: 500,  // 半径500米（圆形）
+        semiMinorAxis: 500,
+        height: 0,          // 平面高度为0
+        extrudedHeight: 0, // 总高度300米（形成柱体，但碰撞检测仅用平面）
         material: Cesium.Color.RED.withAlpha(0.3),
         outline: true,
         outlineColor: Cesium.Color.RED,
         outlineWidth: 2
       }
     });
+
+    const noFlyZoneRectangle = viewer.entities.add({
+      name: "矩形禁飞区",
+      customType: 'rectangle',
+      position: Cesium.Cartesian3.fromDegrees(
+        collisionPoint.lon + 0.005,
+        collisionPoint.lat + 0.005,
+        collisionPoint.alt
+      ),
+
+      rectangle: {
+        coordinates: Cesium.Rectangle.fromDegrees(
+          collisionPoint.lon + 0.005 - 0.005, // 西经
+          collisionPoint.lat + 0.005 - 0.005, // 南纬
+          collisionPoint.lon + 0.005 + 0.005, // 东经
+          collisionPoint.lat + 0.005 + 0.005  // 北纬
+        ),
+        height: 0,
+        extrudedHeight: 0,
+        material: Cesium.Color.YELLOW.withAlpha(0.3)
+      }
+    });
+
     // 3. 启用碰撞检测
     dronePath.enableAirspaceCollisionDetection(
-      [noFlyZone],
+      [noFlyZoneEllipse, noFlyZoneRectangle],
       {
-        warningDistance: 100,  // 100米开始预警
+        warningDistance: 800,  // 100米开始预警
         collisionDistance: 30  // 30米判定碰撞
       }
     );

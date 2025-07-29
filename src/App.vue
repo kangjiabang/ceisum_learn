@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import HelloWorld from './components/HelloWorld.vue'
-import CesiumViewer from './components/CesiumViewer.vue'
 </script>
 
 <template>
