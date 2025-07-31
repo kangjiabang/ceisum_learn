@@ -100,8 +100,8 @@ async function init() {
                 polygon: {
                     hierarchy: Cesium.Cartesian3.fromDegreesArray(building.footprint.flat()),
                     height: 0,
-                    extrudedHeight: building.topHeight,
-                    material: Cesium.Color.BLUE.withAlpha(0.3),
+                    extrudedHeight: building.topHeight + 5,
+                    material: Cesium.Color.BLUE.withAlpha(0.8),
                     outline: true,
                     outlineColor: Cesium.Color.YELLOW,
                     outlineWidth: 3
@@ -213,17 +213,17 @@ async function extractBuildingsByRayCasting(viewer, options = {}) {
             }
 
             //可视化射线（可选，调试用）
-            const color = hitResult ? Cesium.Color.LIMEGREEN : Cesium.Color.RED;
-            viewer.entities.add({
-                polyline: {
-                    positions: [position, hitResult ? hitResult.position : endPoint],
-                    width: 2,
-                    material: new Cesium.PolylineGlowMaterialProperty({
-                        glowPower: 0.2,
-                        color: color.withAlpha(0.8)
-                    })
-                }
-            });
+            // const color = hitResult ? Cesium.Color.LIMEGREEN : Cesium.Color.RED;
+            // viewer.entities.add({
+            //     polyline: {
+            //         positions: [position, hitResult ? hitResult.position : endPoint],
+            //         width: 2,
+            //         material: new Cesium.PolylineGlowMaterialProperty({
+            //             glowPower: 0.2,
+            //             color: color.withAlpha(0.8)
+            //         })
+            //     }
+            // });
 
             if (hitResult) {
                 const carto = Cesium.Cartographic.fromCartesian(hitResult.position);
@@ -232,7 +232,13 @@ async function extractBuildingsByRayCasting(viewer, options = {}) {
                 const height = carto.height;
 
                 console.log(`📍 碰撞点：经度=${hitLon.toFixed(6)}, 纬度=${hitLat.toFixed(6)}, 高度=${height.toFixed(2)}m`);
-                hits.push([hitLon, hitLat]);
+                if (height >= minHeight) {
+                    console.log(`✅ 符合高度要求：${height.toFixed(2)}m >= ${minHeight}m`);
+                    hits.push([hitLon, hitLat]);
+                } else {
+                    console.log(`❌ 不符合高度要求：${height.toFixed(2)}m < ${minHeight}m`);
+                }
+
             }
 
             total++;
@@ -243,32 +249,101 @@ async function extractBuildingsByRayCasting(viewer, options = {}) {
 
     console.log(`✅ 射线发射完成：共 ${total} 个点，命中 ${hits.length} 个`);
 
+    for (let i = 0; i < hits.length - 1; i++) {
+        const from = turf.point(hits[i]);
+        const to = turf.point(hits[i + 1]);
+        const d = turf.distance(from, to, { units: 'meters' });
+        console.log(`点 ${i} 到 ${i + 1} 的距离: ${d.toFixed(2)} m`);
+    }
+
+
+
     if (hits.length === 0) return [];
 
     // 聚类与建筑提取（保持不变）
     const points = turf.points(hits);
-    const clustered = turf.clustersDbscan(points, 15, { minPoints: 4 });
-    const features = clustered.features.filter(f => f.properties.cluster !== -1);
+    // 把 8 米转换为“度”
+    const clusteringDistanceDegrees = 10 / metersPerDegreeLng;
+    //const clustered = turf.clustersDbscan(points, clusteringDistanceDegrees, { minPoints: 5 });
+    const clustered = turf.clustersDbscan(points, 10, { units: 'meters', minPoints: 5 });
 
     const buildings = [];
-    for (const cluster of [...new Set(features.map(f => f.properties.cluster))]) {
+
+    // 过滤有效聚类
+    const features = clustered.features.filter(f => f.properties.cluster !== -1);
+    const clusterIds = [...new Set(features.map(f => f.properties.cluster))];
+
+    console.log(`🔍 发现 ${clusterIds.length} 个有效聚类 (cluster IDs: ${clusterIds.join(', ')})`);
+
+    for (const cluster of clusterIds) {
         const clusterPoints = features
             .filter(f => f.properties.cluster === cluster)
             .map(f => f.geometry.coordinates);
 
-        if (clusterPoints.length < 4) continue;
+        const colorMap = [
+            Cesium.Color.RED, Cesium.Color.BLUE, Cesium.Color.GREEN, Cesium.Color.YELLOW, Cesium.Color.PURPLE
+        ];
+        // 可视化聚类点
+        // for (const f of clustered.features) {
+        //     const [lon, lat] = f.geometry.coordinates;
+        //     const clusterId = f.properties.cluster;
+        //     const color = colorMap[clusterId % colorMap.length];
 
-        const poly = turf.convex(turf.points(clusterPoints));
+        //     viewer.entities.add({
+        //         position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        //         point: {
+        //             pixelSize: 6,
+        //             color: Cesium.Color.BLUE.withAlpha(0.7),
+        //             outlineColor: Cesium.Color.WHITE,
+        //             outlineWidth: 1
+        //         }
+        //     });
+        // }
+
+        console.log(`\n🔍 处理聚类 [${cluster}]：${clusterPoints.length} 个命中点`);
+
+        // 检查点数
+        if (clusterPoints.length < 4) {
+            console.log(`  ⚠️ 跳过：点数不足 4`);
+            continue;
+        }
+
+        // 生成凸包
+        let poly;
+        try {
+            poly = turf.convex(turf.points(clusterPoints));
+        } catch (e) {
+            console.warn(`  ❌ 聚类 ${cluster} 生成凸包失败:`, e.message);
+            continue;
+        }
+
         const area = turf.area(poly);
-        console.log(`🌆 聚类 ${cluster}：${clusterPoints.length} 个点，面积 ${area.toFixed(2)} 平方米`);
-        if (area < minArea) continue;
+        console.log(`  📏 凸包面积: ${area.toFixed(2)} 平方米`);
 
+        // 检查面积
+        if (area < minArea) {
+            console.log(`  ⚠️ 跳过：面积 ${area.toFixed(2)} < ${minArea}`);
+            continue;
+        }
+
+        // 获取建筑中心和轮廓
         const center = turf.center(poly);
-        const footprint = poly.geometry.coordinates[0];
+        const footprint = poly.geometry.coordinates[0]; // [ [x,y], ... ]
 
-        const testPoint = Cesium.Cartesian3.fromDegrees(center.geometry.coordinates[0], center.geometry.coordinates[1]);
-        const result = scene.pickFromRay(new Cesium.Ray(testPoint, getLocalDownDirection(testPoint)));
-        const topHeight = result ? Cesium.Cartographic.fromCartesian(result).height : 10;
+        // 获取建筑高度（从中心点向下射线）
+        const testPoint = Cesium.Cartesian3.fromDegrees(
+            center.geometry.coordinates[0],
+            center.geometry.coordinates[1],
+            flyingHeight
+        );
+        const result = scene.pickFromRay(
+            new Cesium.Ray(testPoint, getLocalDownDirection(testPoint))
+        );
+        const topHeight = result
+            ? Cesium.Cartographic.fromCartesian(result.position).height
+            : 10;
+
+        console.log(`  🏢 识别为建筑：高度 ${topHeight.toFixed(1)}m，面积 ${area.toFixed(1)}㎡`);
 
         buildings.push({
             footprint,
@@ -277,10 +352,11 @@ async function extractBuildingsByRayCasting(viewer, options = {}) {
             center: center.geometry.coordinates
         });
     }
-    console.log(`🏢 提取到 ${buildings.length} 栋建筑`);
+
+    console.log(`\n✅ 最终提取到 ${buildings.length} 栋独立建筑`);
     console.log(buildings.map(b => ({
         center: b.center,
-        footprint: b.footprint.map(coord => typeof coord === 'number' ? coord.toFixed(6) : '0.000000'),
+        footprint: b.footprint,
         topHeight: b.topHeight.toFixed(2),
         area: b.area.toFixed(2)
     })));
