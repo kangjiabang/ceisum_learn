@@ -152,7 +152,7 @@
         const latitude_click = 30.28275965;
 
 
-        const height_click = 300;
+        const height_click = 100;
 
         console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
 
@@ -214,7 +214,7 @@
         ));
 
         // 生成锥形射线（垂直向下为中心）
-        const coneRays = generateConeRays(dronePositionCartesian, 6, 1); // 9条射线，45度锥形角
+        const coneRays = generateConeRays(dronePositionCartesian, 6, 60); // 9条射线，45度锥形角
 
         let collisionDetected = false;
 

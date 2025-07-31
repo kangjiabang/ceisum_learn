@@ -101,32 +101,82 @@ class CollisionApi {
     }
 
     /**
- * 计算无人机到矩形禁飞区的距离
- * @param {Cesium.Entity} droneEntity 无人机实体
- * @param {Cesium.Entity} rectObstacle 矩形禁飞区实体
- * @returns {number} 距离（米），≤0 表示已进入禁飞区
- */
+  * 计算无人机到矩形禁飞区的距离
+  * @param {Cesium.Entity} droneEntity 无人机实体
+  * @param {Cesium.Entity} rectObstacle 矩形禁飞区实体
+  * @returns {number} 距离（米），≤0 表示已进入禁飞区
+  */
     _calculateRectangleDistance(droneEntity, rectObstacle) {
-        const dronePos = droneEntity.position.getValue(viewer.clock.currentTime);
+        const dronePos = droneEntity.position.getValue(this.viewer.clock.currentTime);
         const rect = rectObstacle.rectangle.coordinates.getValue();
-
-        // 将矩形转换为多边形点
-        const rectanglePolygon = [
-            Cesium.Cartesian3.fromRadians(rect.west, rect.south),
-            Cesium.Cartesian3.fromRadians(rect.east, rect.south),
-            Cesium.Cartesian3.fromRadians(rect.east, rect.north),
-            Cesium.Cartesian3.fromRadians(rect.west, rect.north),
-            Cesium.Cartesian3.fromRadians(rect.west, rect.south) // 闭合
-        ];
-
-        // 使用 Cesium 计算点到多边形的距离
-        const distance = Cesium.PolygonPipeline.distanceToPoint(dronePos, rectanglePolygon);
-
-        // 判断是否在内部
         const droneCarto = Cesium.Cartographic.fromCartesian(dronePos);
-        const isInside = Cesium.Rectangle.contains(rect, droneCarto.longitude, droneCarto.latitude);
 
-        return isInside ? -distance : distance;
+        const droneLon = droneCarto.longitude;
+        const droneLat = droneCarto.latitude;
+
+        const west = rect.west;
+        const east = rect.east;
+        const south = rect.south;
+        const north = rect.north;
+
+        // 判断是否在矩形内
+        const isInside = (droneLon >= west && droneLon <= east &&
+            droneLat >= south && droneLat <= north);
+
+        // 计算到最近边界的经纬度距离
+        let lonDist, latDist;
+
+        if (isInside) {
+            // 在内部：计算到边界的负距离
+            const distToWest = droneLon - west;
+            const distToEast = east - droneLon;
+            const distToSouth = droneLat - south;
+            const distToNorth = north - droneLat;
+
+            // 取最小距离作为深入距离（负值）
+            const minDist = Math.min(distToWest, distToEast, distToSouth, distToNorth);
+            // 转换为米并返回负值
+            const earthRadius = Cesium.Ellipsoid.WGS84.maximumRadius;
+            return -Math.abs(minDist) * earthRadius;
+        } else {
+            // 在外部：计算到边界的正距离
+            if (droneLon < west) {
+                lonDist = west - droneLon;
+            } else if (droneLon > east) {
+                lonDist = droneLon - east;
+            } else {
+                lonDist = 0; // 在经度范围内
+            }
+
+            if (droneLat < south) {
+                latDist = south - droneLat;
+            } else if (droneLat > north) {
+                latDist = droneLat - north;
+            } else {
+                latDist = 0; // 在纬度范围内
+            }
+
+            // 如果在矩形的水平投影范围内，只计算纬度距离
+            if (droneLon >= west && droneLon <= east) {
+                const earthRadius = Cesium.Ellipsoid.WGS84.maximumRadius;
+                return Math.abs(latDist) * earthRadius;
+            }
+
+            // 如果在矩形的垂直投影范围内，只计算经度距离
+            if (droneLat >= south && droneLat <= north) {
+                const earthRadius = Cesium.Ellipsoid.WGS84.maximumRadius;
+                return Math.abs(lonDist) * earthRadius * Math.cos(droneLat);
+            }
+
+            // 其他情况：计算到最近角点的距离
+            const earthRadius = Cesium.Ellipsoid.WGS84.maximumRadius;
+            const distance = Math.sqrt(
+                Math.pow(lonDist * earthRadius * Math.cos(droneLat), 2) +
+                Math.pow(latDist * earthRadius, 2)
+            );
+
+            return distance;
+        }
     }
 
 
@@ -147,7 +197,7 @@ class CollisionApi {
         if (isWarning) {
             // 保存原始材质（如果未保存）
             if (!this._originalMaterials.has(droneEntity)) {
-                this._originalMaterials.set(droneEntity, droneEntity.model.material);
+                this._originalMaterials.set(droneEntity, droneEntity.model.color);
             }
             console.warn(`碰撞预警！ '障碍物' 发生预警`);
 
@@ -157,9 +207,11 @@ class CollisionApi {
                 return Cesium.Color.RED.withAlpha(alpha);
             }, false);
         } else {
+            console.warn(`恢复到正常状态`);
             // 恢复原始材质
             const original = this._originalMaterials.get(droneEntity);
-            if (original) droneEntity.model.material = original;
+            // 如果有原始材质则恢复，即使为空，也进行设置
+            droneEntity.model.color = original;
         }
     }
 

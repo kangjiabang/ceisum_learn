@@ -23,6 +23,37 @@ class DronePath {
     }
 
     /**
+ * 获取无人机当前世界坐标位置
+ * @returns {Cesium.Cartesian3|null} 当前位置，若无数据则返回 null
+ */
+    getCurrentPosition() {
+        if (!this.sampledPosition || !this.startTime) {
+            console.warn("尚未创建飞行路径或未开始飞行。");
+            return null;
+        }
+
+        // 获取当前时钟时间（模拟时间）
+        const currentTime = this.viewer.clock.currentTime;
+
+        // 检查是否在有效时间段内
+        if (
+            Cesium.JulianDate.lessThan(currentTime, this.startTime) ||
+            Cesium.JulianDate.greaterThan(currentTime, this.viewer.clock.stopTime)
+        ) {
+            console.warn("当前时间超出飞行路径时间范围。");
+            return null;
+        }
+
+        try {
+            // 获取插值位置
+            return this.sampledPosition.getValue(currentTime);
+        } catch (err) {
+            console.warn("无法获取当前位置：", err.message);
+            return null;
+        }
+    }
+
+    /**
      * 创建飞行路径
      * @param {Array} waypoints - 航点数组 [{lon, lat, alt}, ...]
      * @param {Object} options - 可选参数

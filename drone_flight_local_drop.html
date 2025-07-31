@@ -52,6 +52,89 @@
 
     await dronePath.startFlight();
 
+    // === 物资投放功能 ===
+    let supplyEntity = null;
+    let isDropped = false;
+    let fallSpeed = 0;
+    const gravity = 9.8; // m/s²
+    const dropStartTime = null;
+    let dropPosition = null;
+
+    // 监听无人机位置，在合适时机投放
+    const dropCheckInterval = setInterval(() => {
+      const dronePosition = dronePath.getCurrentPosition();
+      if (!dronePosition || isDropped) return;
+
+      // 示例：当无人机飞过第3个航点附近时投放
+      const dropWaypoint = Cesium.Cartesian3.fromDegrees(waypoints[2].lon, waypoints[2].lat, waypoints[2].alt);
+      const distanceToWaypoint = Cesium.Cartesian3.distance(dronePosition, dropWaypoint);
+
+      if (distanceToWaypoint < 50 && !isDropped) { // 距离小于50米时投放
+        isDropped = true;
+        clearInterval(dropCheckInterval);
+
+        // 获取当前无人机高度位置作为起始投放点
+        dropPosition = Cesium.Cartesian3.clone(dronePosition);
+
+        // 创建物资实体（小立方体或模型）
+        supplyEntity = viewer.entities.add({
+          name: "投放物资",
+          position: dropPosition,
+          box: {
+            dimensions: new Cesium.Cartesian3(2, 2, 2), // 2x2x2 米的箱子
+            material: Cesium.Color.BLUE.withAlpha(0.8),
+            outline: true,
+            outlineColor: Cesium.Color.WHITE
+          }
+        });
+
+        console.log("📦 物资已投放，开始下落！");
+
+
+        // ✅ 投放物资后，设置动态下落位置
+        const initialCartographic = Cesium.Cartographic.fromCartesian(dropPosition);
+        let currentHeight = initialCartographic.height;
+        let localFallSpeed = 0;
+        const terrainHeight = 0; // 可替换为地形高度
+        let lastTime = undefined; // ✅ 必须定义并更新
+
+        supplyEntity.position = new Cesium.CallbackProperty((time) => {
+          // 第一次调用时，记录时间
+          if (!lastTime) {
+            lastTime = Cesium.JulianDate.clone(time);
+            return dropPosition; // 返回初始位置
+          }
+
+          // 计算时间差（秒）
+          const deltaTime = Cesium.JulianDate.secondsDifference(time, lastTime);
+          lastTime = Cesium.JulianDate.clone(time); // ✅ 更新 lastTime
+
+          if (deltaTime > 0 && currentHeight > terrainHeight) {
+            localFallSpeed += gravity * deltaTime;         // 加速度：重力
+            currentHeight -= localFallSpeed * deltaTime;  // 高度下降
+            if (currentHeight < terrainHeight) {
+              currentHeight = terrainHeight;
+            }
+          }
+
+          // 构造新位置（经纬度不变，高度下降）
+          const newPosition = Cesium.Cartesian3.fromRadians(
+            initialCartographic.longitude,
+            initialCartographic.latitude,
+            currentHeight
+          );
+
+          // 落地后可以打印一次（用标志位避免重复）
+          if (currentHeight === terrainHeight && localFallSpeed > 0) {
+            console.log("📦 物资已落地！");
+            localFallSpeed = 0; // 停止速度
+          }
+
+          return newPosition;
+        }, false); // false = 不是常量，会变化
+      }
+    }, 100); // 每100ms检查一次
+
     // 2. 创建空域障碍物
     // 在无人机路径上选择一个会碰撞的点（例如第三个航点）
     const collisionPoint = waypoints[2]; // { lon: 120.716, lat: 31.327, alt: 200 }
