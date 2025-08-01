@@ -93,8 +93,30 @@ async function init() {
 
         status.innerText = `✅ 提取完成：${buildings.length} 栋建筑`;
 
+        let fileContent = ''; // 用于存储文件内容
+
         // 可视化建筑
         for (const building of buildings) {
+            // 将 footprint 转换为 WKT 格式的 MULTIPOLYGON 字符串
+            const coordinates = building.footprint.flat();
+            let wktString = "MULTIPOLYGON(((";
+
+            // 遍历坐标点，每两个元素为一组经纬度
+            for (let i = 0; i < coordinates.length; i += 2) {
+                const longitude = coordinates[i].toFixed(7);
+                const latitude = coordinates[i + 1].toFixed(7);
+                wktString += `${longitude} ${latitude}`;
+
+                // 如果不是最后一个点，添加逗号
+                if (i < coordinates.length - 2) {
+                    wktString += ",";
+                }
+            }
+
+            wktString += ")))";
+            console.log(`🎨 建筑footprint WKT格式:${wktString}` + `,高度:${building.topHeight}`);
+            // 添加到文件内容中
+            fileContent += `"${wktString}","${building.topHeight.toFixed(2)}"\n`;
             viewer.entities.add({
                 name: `建筑 (${building.topHeight.toFixed(1)}m)`,
                 polygon: {
@@ -115,6 +137,22 @@ async function init() {
                 }
             });
         }
+
+        // 保存到文件
+        function saveToFile(content, filename) {
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // 执行保存
+        saveToFile(fileContent, 'buildings_output.txt');
     };
 }
 init();
