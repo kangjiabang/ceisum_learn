@@ -1,6 +1,6 @@
 // main.js
 import * as Cesium from 'cesium';
-import { calculateBuildingsHeight, getLocalDownDirection, extractBuildingsByRayCasting, saveToFile } from './ray_height.js';
+import { calculateBuildingsHeight, getLocalDownDirection, extractBuildingsByRayCasting, saveToFile } from './ray_height_new.js';
 
 // 设置 Cesium 访问令牌
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
@@ -79,7 +79,7 @@ async function init() {
         const [centerLon, centerLat] = clickedPosition;
 
         // 设置采样范围（±10米）
-        const radiusMeters = 1000.0;
+        const radiusMeters = 100.0;
         // const west = 119.99733369870195;  // 西经
         // const east = 120.00149483788569;  // 东经
         // const south = 30.282700396835303;  // 南纬
@@ -94,7 +94,8 @@ async function init() {
         const buildings = await extractBuildingsByRayCasting(viewer, {
             west, south, east, north,
             sampleSpacing: 3.0,     // 每 5 米采样一次
-            minHeight: 20.0,
+            minHeight: 100.0,
+            maxHeight: 500.0,
             minArea: 100
         });
 
@@ -129,7 +130,7 @@ async function init() {
                 polygon: {
                     hierarchy: Cesium.Cartesian3.fromDegreesArray(building.footprint.flat()),
                     height: 0,
-                    extrudedHeight: building.topHeight + 5,
+                    extrudedHeight: building.topHeight,
                     material: Cesium.Color.BLUE.withAlpha(0.8),
                     outline: true,
                     outlineColor: Cesium.Color.YELLOW,

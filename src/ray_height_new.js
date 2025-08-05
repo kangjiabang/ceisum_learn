@@ -1,3 +1,7 @@
+const HEIGHT_RANGE_15_20 = '15_20';
+const HEIGHT_RANGE_20_30 = '20_30';
+const HEIGHT_RANGE_30_100 = '30_100';
+const HEIGHT_RANGE_100_500 = '100_500';
 export async function extractBuildingsByRayCasting(viewer, options = {}) {
     const {
         west, south, east, north,
@@ -13,10 +17,10 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
 
     // 1. 创建按高度分类的 hits 数组
     const hitsByHeight = {
-        '10_20': [],
-        '20_30': [],
-        '30_100': [],
-        '100_500': []
+        [HEIGHT_RANGE_15_20]: [],
+        [HEIGHT_RANGE_20_30]: [],
+        [HEIGHT_RANGE_30_100]: [],
+        [HEIGHT_RANGE_100_500]: []
     };
     let total = 0;
 
@@ -88,14 +92,14 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
                 //console.log(`📍 碰撞点：经度=${hitLon.toFixed(6)}, 纬度=${hitLat.toFixed(6)}, 高度=${height.toFixed(2)}m`);
 
                 // 2. 根据高度将命中点分类到不同的数组中
-                if (height >= 10 && height < 20) {
-                    // hitsByHeight['10_20'].push([hitLon, hitLat]);
+                if (height >= 15 && height < 20) {
+                    hitsByHeight[HEIGHT_RANGE_15_20].push([hitLon, hitLat, height]);
                 } else if (height >= 20 && height < 30) {
-                    hitsByHeight['20_30'].push([hitLon, hitLat]);
+                    hitsByHeight[HEIGHT_RANGE_20_30].push([hitLon, hitLat, height]);
                 } else if (height >= 30 && height < 100) {
-                    hitsByHeight['30_100'].push([hitLon, hitLat]);
+                    hitsByHeight[HEIGHT_RANGE_30_100].push([hitLon, hitLat, height]);
                 } else if (height >= 100 && height <= 500) { // 注意这里是 <= maxHeight
-                    hitsByHeight['100_500'].push([hitLon, hitLat]);
+                    hitsByHeight[HEIGHT_RANGE_100_500].push([hitLon, hitLat, height]);
                 }
 
                 // if (height >= minHeight && height <= maxHeight) {
@@ -129,10 +133,10 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
 
     // 定义高度区间配置，用于传递给 getBuildingsByTurf
     const heightRanges = [
-        { key: '10_20', minH: 10, maxH: 20, label: "10~20米" },
-        { key: '20_30', minH: 20, maxH: 30, label: "20~30米" },
-        { key: '30_100', minH: 30, maxH: 100, label: "30~100米" },
-        { key: '100_500', minH: 100, maxH: 500, label: "100~500米" }
+        { key: HEIGHT_RANGE_15_20, minH: 15, maxH: 20, label: "15~20米" },
+        { key: HEIGHT_RANGE_20_30, minH: 20, maxH: 30, label: "20~30米" },
+        { key: HEIGHT_RANGE_30_100, minH: 30, maxH: 100, label: "30~100米" },
+        { key: HEIGHT_RANGE_100_500, minH: 100, maxH: 500, label: "100~500米" }
     ];
     // 保存所有命中点到文件
     // const hitLines = hits.map(([lon, lat]) => `${lon},${lat}`).join('\n');
@@ -169,7 +173,7 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
 
         // 把 8 米转换为“度”
         //const clustered = turf.clustersDbscan(points, clusteringDistanceDegrees, { minPoints: 5 });
-        const clustered = turf.clustersDbscan(points, 8, { units: 'meters', minPoints: 10 });
+        const clustered = turf.clustersDbscan(points, 5, { units: 'meters', minPoints: 10 });
 
         const buildings = [];
 
@@ -184,17 +188,8 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
 
             const clusterPoints = features
                 .filter(f => f.properties.cluster === cluster)
-                .map(f => f.geometry.coordinates);
+                .map(f => [...f.geometry.coordinates, f.properties.height]);
 
-            // const clusterPoints = features
-            // .map(f => {
-            //     const coords = f.geometry.coordinates;
-            //     if (!Array.isArray(coords) || coords.length < 2 || typeof coords[0] !== 'number') {
-            //         return null;
-            //     }
-            //     return [coords[0], coords[1]]; // 显式提取 [lon, lat]
-            // })
-            // .filter(Boolean);
             const colorMap = [
                 Cesium.Color.RED, Cesium.Color.BLUE, Cesium.Color.GREEN, Cesium.Color.YELLOW, Cesium.Color.PURPLE
             ];
@@ -257,23 +252,14 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
             const footprint = poly.geometry.coordinates[0]; // [ [lon, lat], ... ]
 
 
-            // 从 footprint 中取四个等间距点（可自定义数量）
-            const samplePoints = [];
-            const len = footprint.length;
-            for (let i = 0; i < 4; i++) {
-                const idx = Math.floor(i * len / 4); // 四等分
-                samplePoints.push(footprint[idx]);
-            }
+            //const avgHeight = clusterPoints.reduce((sum, p) => sum + p[2], 0) / clusterPoints.length;
+            // 计算最大高度
+            const topHeight = clusterPoints.reduce((maxHeight, p) => {
+                const currentPointHeight = p[2]; // 获取当前点的高度 (p[2])
+                return currentPointHeight > maxHeight ? currentPointHeight : maxHeight;
+            }, -Infinity); // 初始值设为 -Infinity，确保任何实际高度都会比它大
 
-            // 对四个点分别计算高度
-            let topHeight = 0;
-            for (const [lon, lat] of samplePoints) {
-                const testPoint = Cesium.Cartesian3.fromDegrees(lon, lat, flyingHeight);
-                const height = await calculateBuildingsHeight(viewer, testPoint);
-                topHeight = Math.max(topHeight, height);
-            }
-
-            console.log(`  🏢 识别为建筑：高度 ${topHeight.toFixed(2)}m，面积 ${area.toFixed(2)}㎡`);
+            console.log(`  🏢 识别为建筑：高度 ${topHeight.toFixed(2)}m，面积 ${topHeight.toFixed(2)}㎡`);
 
             buildings.push({
                 footprint,

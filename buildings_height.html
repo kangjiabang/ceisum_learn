@@ -53,88 +53,11 @@
 
     // 定位到 Tileset
     viewer.zoomTo(tileset);
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
 
-    // 生成垂直向下的射线方向（局部坐标系）
-    function getLocalDownDirection(position) {
-      // 获取位置的局部东北天(ENU)坐标系
-      const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(position);
-
-      // 从ENU矩阵中提取"下"方向（ENU中的Down是-Z轴）
-      const downDirection = new Cesium.Cartesian3();
-      Cesium.Matrix4.multiplyByPointAsVector(
-        enuMatrix,
-        new Cesium.Cartesian3(0, 0, -1),
-        downDirection
-      );
-
-      Cesium.Cartesian3.normalize(downDirection, downDirection);
-      return downDirection;
-    }
-
-    // 生成锥形分布的射线
-    function generateConeRays(origin, rayCount = 12, coneAngle = 30) {
-      const rays = [];
-
-      // 获取局部坐标系的"下"方向
-      const localDown = getLocalDownDirection(origin);
-
-      // 获取局部坐标系的变换矩阵
-      const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
-      const inverseEnuMatrix = Cesium.Matrix4.inverse(enuMatrix, new Cesium.Matrix4());
-
-      if (rayCount === 1) {
-        // 只生成一个垂直向下的射线
-        rays.push({
-          direction: localDown,
-          isCenterRay: true
-        });
-        return rays;
-      }
-
-      // 生成锥形射线
-      for (let i = 0; i < rayCount; i++) {
-        if (i === 0) {
-          // 中心射线：垂直向下
-          rays.push({
-            direction: localDown,
-            horizontalAngle: 0,
-            verticalAngle: 0,
-            isCenterRay: true
-          });
-        } else {
-          // 锥形周围的射线
-          const surroundingRays = rayCount - 1;
-          const index = i - 1;
-
-          const horizontalAngle = (index / surroundingRays) * 2 * Math.PI;
-          const coneAngleRad = Cesium.Math.toRadians(coneAngle);
-
-          // 在局部ENU坐标系中计算方向
-          const x = Math.sin(coneAngleRad) * Math.cos(horizontalAngle); // 东向分量
-          const y = Math.sin(coneAngleRad) * Math.sin(horizontalAngle); // 北向分量
-          const z = -Math.cos(coneAngleRad); // 下向分量（负号表示向下）
-
-          // 转换到世界坐标系
-          const localDirection = new Cesium.Cartesian3(x, y, z);
-          const worldDirection = new Cesium.Cartesian3();
-
-          Cesium.Matrix4.multiplyByPointAsVector(enuMatrix, localDirection, worldDirection);
-          Cesium.Cartesian3.normalize(worldDirection, worldDirection);
-
-          rays.push({
-            direction: worldDirection,
-            horizontalAngle: Cesium.Math.toDegrees(horizontalAngle),
-            verticalAngle: coneAngle,
-            isCenterRay: false
-          });
-        }
-      }
-
-      return rays;
-    }
-
-    viewer.canvas.addEventListener('click', async (event) => {
+    handler.setInputAction(async (click) => {
       try {
+        console.log('单击事件: ', click);
         // 清除之前的无人机和射线
         if (droneEntity) {
           viewer.entities.remove(droneEntity);
@@ -147,12 +70,34 @@
         });
         rayEntities = [];
 
+        // === 获取点击的屏幕坐标（Cartesian2）===
+        const cartesian2 = click.position; // 这是 Cesium.ScreenSpaceEventHandler 提供的正确坐标
+        if (!cartesian2) {
+          console.warn("未获取到屏幕坐标");
+          return;
+        }
+
+        // === 从屏幕坐标拾取 3D 世界坐标 ===
+        const pickedPoint = viewer.scene.pickPosition(cartesian2);
+        if (!Cesium.defined(pickedPoint)) {
+          console.warn("无法获取点击位置的3D坐标（可能点击了天空）");
+          return;
+        }
+
+        // === 转换为经纬度 ===
+        const cartographic = Cesium.Cartographic.fromCartesian(pickedPoint);
+        if (!cartographic) {
+          console.warn("无法将3D坐标转换为地理坐标");
+          return;
+        }
+
+        const longitude_click = Cesium.Math.toDegrees(cartographic.longitude);
+        const latitude_click = Cesium.Math.toDegrees(cartographic.latitude);
+        const height_click = 100; // 无人机悬停高度设为300米
+
         // 使用固定的建筑物中心点坐标
-        const longitude_click = 119.9980574;
-        const latitude_click = 30.28275965;
-
-
-        const height_click = 100;
+        //const longitude_click = 119.9980574;
+        //const latitude_click = 30.28275965;
 
         console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
 
@@ -316,7 +261,88 @@
       } catch (error) {
         console.error("处理过程中出错:", error);
       }
-    });
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+    // 生成垂直向下的射线方向（局部坐标系）
+    function getLocalDownDirection(position) {
+      // 获取位置的局部东北天(ENU)坐标系
+      const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+
+      // 从ENU矩阵中提取"下"方向（ENU中的Down是-Z轴）
+      const downDirection = new Cesium.Cartesian3();
+      Cesium.Matrix4.multiplyByPointAsVector(
+        enuMatrix,
+        new Cesium.Cartesian3(0, 0, -1),
+        downDirection
+      );
+
+      Cesium.Cartesian3.normalize(downDirection, downDirection);
+      return downDirection;
+    }
+
+    // 生成锥形分布的射线
+    function generateConeRays(origin, rayCount = 12, coneAngle = 30) {
+      const rays = [];
+
+      // 获取局部坐标系的"下"方向
+      const localDown = getLocalDownDirection(origin);
+
+      // 获取局部坐标系的变换矩阵
+      const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+      const inverseEnuMatrix = Cesium.Matrix4.inverse(enuMatrix, new Cesium.Matrix4());
+
+      if (rayCount === 1) {
+        // 只生成一个垂直向下的射线
+        rays.push({
+          direction: localDown,
+          isCenterRay: true
+        });
+        return rays;
+      }
+
+      // 生成锥形射线
+      for (let i = 0; i < rayCount; i++) {
+        if (i === 0) {
+          // 中心射线：垂直向下
+          rays.push({
+            direction: localDown,
+            horizontalAngle: 0,
+            verticalAngle: 0,
+            isCenterRay: true
+          });
+        } else {
+          // 锥形周围的射线
+          const surroundingRays = rayCount - 1;
+          const index = i - 1;
+
+          const horizontalAngle = (index / surroundingRays) * 2 * Math.PI;
+          const coneAngleRad = Cesium.Math.toRadians(coneAngle);
+
+          // 在局部ENU坐标系中计算方向
+          const x = Math.sin(coneAngleRad) * Math.cos(horizontalAngle); // 东向分量
+          const y = Math.sin(coneAngleRad) * Math.sin(horizontalAngle); // 北向分量
+          const z = -Math.cos(coneAngleRad); // 下向分量（负号表示向下）
+
+          // 转换到世界坐标系
+          const localDirection = new Cesium.Cartesian3(x, y, z);
+          const worldDirection = new Cesium.Cartesian3();
+
+          Cesium.Matrix4.multiplyByPointAsVector(enuMatrix, localDirection, worldDirection);
+          Cesium.Cartesian3.normalize(worldDirection, worldDirection);
+
+          rays.push({
+            direction: worldDirection,
+            horizontalAngle: Cesium.Math.toDegrees(horizontalAngle),
+            verticalAngle: coneAngle,
+            isCenterRay: false
+          });
+        }
+      }
+
+      return rays;
+    }
+
+
   </script>
 </body>
 
