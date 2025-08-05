@@ -5,6 +5,17 @@ import { calculateBuildingsHeight, getLocalDownDirection, extractBuildingsByRayC
 // 设置 Cesium 访问令牌
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
 
+// --- 新增：定义要扫描的经纬度范围 ---
+// 请根据你的实际需求修改这些值
+const SCAN_WEST = 119.9384401375432;  // 西经
+const SCAN_EAST = 120.03013724921674;  // 东经
+const SCAN_SOUTH = 30.261852568883025;  // 南纬
+const SCAN_NORTH = 30.31701791606819;  // 北纬
+
+const SCAN_SAMPLE_SPACING = 3.0; // 采样间距 (米)
+const SCAN_MIN_HEIGHT = 20.0;    // 最小建筑高度 (米)
+const SCAN_MIN_AREA = 100;       // 最小建筑面积 (平方米)
+
 async function init() {
     const viewer = new Cesium.Viewer('cesiumContainer', {
         terrain: Cesium.Terrain.fromWorldTerrain(),
@@ -32,70 +43,21 @@ async function init() {
 
     // 点击事件：选择中心点
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-    handler.setInputAction((movement) => {
-        const ray = viewer.camera.getPickRay(movement.position);
-        const position = viewer.scene.globe.pick(ray, viewer.scene);
-
-        if (position) {
-            const carto = Cesium.Cartographic.fromCartesian(position);
-            const lon = Cesium.Math.toDegrees(carto.longitude);
-            const lat = Cesium.Math.toDegrees(carto.latitude);
-
-            clickedPosition = [lon, lat];
-
-            // 可视化点击点
-            viewer.entities.add({
-                position: position,
-                point: {
-                    pixelSize: 8,
-                    color: Cesium.Color.RED,
-                    outlineColor: Cesium.Color.WHITE,
-                    outlineWidth: 2
-                },
-                label: {
-                    text: '采样中心',
-                    font: '14px sans-serif',
-                    horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                    pixelOffset: new Cesium.Cartesian2(10, 0)
-                }
-            });
-
-            console.log(`✅ 已点击位置：经度 ${lon.toFixed(6)}, 纬度 ${lat.toFixed(6)}`);
-            document.getElementById('status').innerText = `已选择中心点：${lon.toFixed(6)}, ${lat.toFixed(6)}。点击【提取建筑】开始分析。`;
-        } else {
-            console.log('❌ 未点击到地面');
-            document.getElementById('status').innerText = '未点击到地面，请点击地形表面。';
-        }
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     // 提取按钮
     document.getElementById('extractBtn').onclick = async () => {
-        if (!clickedPosition) {
-            document.getElementById('status').innerText = '❌ 请先在地图上点击选择一个位置！';
-            return;
-        }
 
-        const [centerLon, centerLat] = clickedPosition;
-
-        // 设置采样范围（±10米）
-        const radiusMeters = 1000.0;
-        // const west = 119.99733369870195;  // 西经
-        // const east = 120.00149483788569;  // 东经
-        // const south = 30.282700396835303;  // 南纬
-        // const north = 30.286293673814072;  // 北纬
-        const { west, east, south, north } = getRectAroundPoint(centerLon, centerLat, radiusMeters);
-
-        console.log(`🌍 采样范围：经度 [${west.toFixed(6)} ~ ${east.toFixed(6)}]，纬度 [${south.toFixed(6)} ~ ${north.toFixed(6)}]`);
-        console.log(`🌍 采样范围：经度 [${west} ~ ${east}]，纬度 [${south} ~ ${north}]`);
         const status = document.getElementById('status');
         status.innerText = '正在发射射线...';
 
         const buildings = await extractBuildingsByRayCasting(viewer, {
-            west, south, east, north,
-            sampleSpacing: 3.0,     // 每 5 米采样一次
-            minHeight: 20.0,
-            minArea: 100
+            west: SCAN_WEST,
+            south: SCAN_SOUTH,
+            east: SCAN_EAST,
+            north: SCAN_NORTH,
+            sampleSpacing: SCAN_SAMPLE_SPACING,
+            minHeight: SCAN_MIN_HEIGHT,
+            minArea: SCAN_MIN_AREA
         });
 
         status.innerText = `✅ 提取完成：${buildings.length} 栋建筑`;
@@ -168,5 +130,4 @@ function getRectAroundPoint(centerLon, centerLat, radiusMeters) {
     };
 }
 
-// 建筑提取函数（修正版）
 
