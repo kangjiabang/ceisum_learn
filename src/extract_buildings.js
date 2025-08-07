@@ -96,7 +96,7 @@ async function init() {
             sampleSpacing: 3.0,     // 每 5 米采样一次
             minHeight: 100.0,
             maxHeight: 500.0,
-            minArea: 100
+            minArea: 30
         });
 
         status.innerText = `✅ 提取完成：${buildings.length} 栋建筑`;

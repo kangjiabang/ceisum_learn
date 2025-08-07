@@ -82,19 +82,20 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
             }
 
             //可视化射线（可选，调试用）
-            //showRayPoint(hitResult, position, endPoint);
+            //showRayPoint(viewer, hitResult, position, endPoint);
 
             if (hitResult) {
                 const carto = Cesium.Cartographic.fromCartesian(hitResult.position);
                 const hitLon = Cesium.Math.toDegrees(carto.longitude);
                 const hitLat = Cesium.Math.toDegrees(carto.latitude);
                 const height = carto.height;
-                //console.log(`📍 碰撞点：经度=${hitLon.toFixed(6)}, 纬度=${hitLat.toFixed(6)}, 高度=${height.toFixed(2)}m`);
+                //console.log(`📍 高度=${height.toFixed(2)}m`);
 
                 // 2. 根据高度将命中点分类到不同的数组中
-                if (height >= 15 && height < 20) {
-                    hitsByHeight[HEIGHT_RANGE_15_20].push([hitLon, hitLat, height]);
-                } else if (height >= 20 && height < 30) {
+                // if (height >= 16 && height < 18) {
+                //     hitsByHeight[HEIGHT_RANGE_15_20].push([hitLon, hitLat, height]);
+                // } else
+                if (height >= 18 && height < 30) {
                     hitsByHeight[HEIGHT_RANGE_20_30].push([hitLon, hitLat, height]);
                 } else if (height >= 30 && height < 100) {
                     hitsByHeight[HEIGHT_RANGE_30_100].push([hitLon, hitLat, height]);
@@ -118,9 +119,30 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
     }
 
     console.log(`✅ 射线发射完成：共 ${total} 个点`);
+
     // 输出各高度区间的命中点数量
     for (const [range, hitsArray] of Object.entries(hitsByHeight)) {
         console.log(`   - 高度区间 ${range.replace('_', '~')}m: ${hitsArray.length} 个命中点`);
+    }
+
+    // 3. 保存所有命中点（包含经纬度和高度）到文件
+    const allHitPointsForFile = []; // 用于存储所有命中点信息 [lon, lat, height]
+    // 遍历 hitsByHeight 对象中的所有命中点
+    for (const hitsArray of Object.values(hitsByHeight)) {
+        allHitPointsForFile.push(...hitsArray); // 将每个区间的点合并到总数组
+    }
+
+    if (allHitPointsForFile.length > 0) {
+        // 准备CSV格式的内容，包含表头
+        const csvContent = "longitude,latitude,height\n" + allHitPointsForFile.map(([lon, lat, height]) => `${lon.toFixed(8)},${lat.toFixed(8)},${height.toFixed(2)}`).join('\n');
+        // 生成文件名
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); // 生成时间戳用于文件名
+        const filename = `all_hit_points_${timestamp}.csv`;
+        // 保存文件
+        saveToFile(csvContent, filename);
+        console.log(`💾 已保存所有 ${allHitPointsForFile.length} 个命中点（含高度）到文件: ${filename}`);
+    } else {
+        console.log("⚠️ 没有命中点可保存。");
     }
 
     //调试点与点之间距离
@@ -143,7 +165,7 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
     // saveToFile(hitLines, 'hits.csv');
 
     // 每10000个点进行一次建筑提取
-    const batchSize = 1000;
+    const batchSize = 10000;
     const allBuildings = [];
     for (const range of heightRanges) {
         const hitsInThisRange = hitsByHeight[range.key];
@@ -158,7 +180,7 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
             const batch = hitsInThisRange.slice(i, i + batchSize);
             console.log(`🚀 处理第 ${(i / batchSize) + 1} 批：${batch.length} 个点`);
 
-            const buildings = await getBuildingsByTurf(batch);
+            const buildings = await getBuildingsByTurf(batch, range.key);
             allBuildings.push(...buildings);
         }
         console.log(`✅ 高度区间 ${range.label} 处理完成，共提取到 ${allBuildings.length} 栋建筑`);
@@ -168,13 +190,18 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
 
     return allBuildings;
 
-    async function getBuildingsByTurf(hits) {
+    async function getBuildingsByTurf(hits, range_key) {
         const points = turf.points(hits);
 
         // 把 8 米转换为“度”
         //const clustered = turf.clustersDbscan(points, clusteringDistanceDegrees, { minPoints: 5 });
-        const clustered = turf.clustersDbscan(points, 5, { units: 'meters', minPoints: 10 });
-
+        let clustered = null;
+        if (range_key === HEIGHT_RANGE_15_20) {
+            clustered = turf.clustersDbscan(points, 5, { units: 'meters', minPoints: 6 });
+        } else {
+            // >=18 米时
+            clustered = turf.clustersDbscan(points, 5, { units: 'meters', minPoints: 8 });
+        }
         const buildings = [];
 
         // 过滤有效聚类
@@ -193,21 +220,10 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
             const colorMap = [
                 Cesium.Color.RED, Cesium.Color.BLUE, Cesium.Color.GREEN, Cesium.Color.YELLOW, Cesium.Color.PURPLE
             ];
-            // 可视化聚类点
-            // for (const f of clustered.features) {
-            //     const [lon, lat] = f.geometry.coordinates;
-            //     const clusterId = f.properties.cluster;
-            //     const color = colorMap[clusterId % colorMap.length];
-            //     viewer.entities.add({
-            //         position: Cesium.Cartesian3.fromDegrees(lon, lat),
-            //         point: {
-            //             pixelSize: 6,
-            //             color: Cesium.Color.BLUE.withAlpha(0.7),
-            //             outlineColor: Cesium.Color.WHITE,
-            //             outlineWidth: 1
-            //         }
-            //     });
-            // }
+            //可视化聚类点
+            // ✅ 正确地从 features 中筛选出该 clusterId 对应的 feature 点
+            //showPoints(features, cluster, colorMap);
+
             console.log(`\n🔍 处理聚类 [${cluster}]：${clusterPoints.length} 个命中点`);
 
             // 检查点数
@@ -224,7 +240,7 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
             //     console.warn(`  ❌ 聚类 ${cluster} 生成凸包失败:`, e.message);
             //     continue;
             // }
-            let poly = turf.concave(turf.points(clusterPoints), { maxEdge: 0.05 }); // ≈50 米
+            let poly = turf.concave(turf.points(clusterPoints), { maxEdge: 0.20 }); // ≈50 米
             if (!poly) {
                 console.warn(`  ❌ 聚类 ${cluster} 凹包生成失败，回退到凸包`);
                 poly = turf.convex(turf.points(clusterPoints));
@@ -252,14 +268,14 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
             const footprint = poly.geometry.coordinates[0]; // [ [lon, lat], ... ]
 
 
-            //const avgHeight = clusterPoints.reduce((sum, p) => sum + p[2], 0) / clusterPoints.length;
-            // 计算最大高度
+            // const topHeight = clusterPoints.reduce((sum, p) => sum + p[2], 0) / clusterPoints.length;
+            //计算最大高度
             const topHeight = clusterPoints.reduce((maxHeight, p) => {
                 const currentPointHeight = p[2]; // 获取当前点的高度 (p[2])
                 return currentPointHeight > maxHeight ? currentPointHeight : maxHeight;
             }, -Infinity); // 初始值设为 -Infinity，确保任何实际高度都会比它大
 
-            console.log(`  🏢 识别为建筑：高度 ${topHeight.toFixed(2)}m，面积 ${topHeight.toFixed(2)}㎡`);
+            console.log(`  🏢 识别为建筑：高度 ${topHeight.toFixed(2)}m，面积 ${area.toFixed(2)}㎡`);
 
             buildings.push({
                 footprint,
@@ -279,11 +295,36 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
 
         return buildings;
     }
+
+    function showPoints(features, cluster, colorMap) {
+        const clusterFeatures = features.filter(f => f.properties.cluster === cluster);
+
+        // ✅ 可视化聚类点
+        for (const f of clusterFeatures) {
+            const [lon, lat] = f.geometry.coordinates;
+            const color = colorMap[cluster % colorMap.length];
+
+            // 定义方块的大小（例如，10米 x 10米 x 2米）
+            const boxDimensions = new Cesium.Cartesian3(1.0, 1.0, 1.0); // X, Y, Z 半轴长度 (米)
+            const surfacePosition = Cesium.Cartesian3.fromDegrees(lon, lat, 100);
+            const addedEntity = viewer.entities.add({
+                position: surfacePosition, // 使用计算出的包含高度的位置
+                box: {
+                    dimensions: boxDimensions, // 设置方块的尺寸
+                    material: new Cesium.ColorMaterialProperty(color.withAlpha(0.7)), // 设置颜色和透明度
+                    outline: true, // 显示边框
+                    outlineColor: Cesium.Color.WHITE,
+                    outlineWidth: 1.0,
+                }
+            });
+            //console.log("Entity added:", addedEntity); // 检查 entity 是否创建成功
+        }
+    }
 }
 
 
 
-function showRayPoint(hitResult, position, endPoint) {
+function showRayPoint(viewer, hitResult, position, endPoint) {
     const color = hitResult ? Cesium.Color.LIMEGREEN : Cesium.Color.RED;
     viewer.entities.add({
         polyline: {
