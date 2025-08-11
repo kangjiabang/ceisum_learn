@@ -224,7 +224,7 @@ class CollisionApi {
             const color = Cesium.Color.fromHsl(hue, 1.0, 0.5, 0.8);
 
             // 脉冲缩放 (0.8~1.2倍)
-            const scale = 1.0 + 0.2 * Math.sin(Date.now() / 200);
+            const scale = 1.0 + 0.5 * Math.sin(Date.now() / 200);
             entity.model.scale = new Cesium.ConstantProperty(scale);
 
             return color;
