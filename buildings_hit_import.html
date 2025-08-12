@@ -69,7 +69,8 @@
       { lon: 120.0100, lat: 30.2900, height: 100 }
     ];
 
-
+    let isDetectionEnabled = false; // 初始不检测
+    let autoStopTimer = null;       // 60 秒自动停止定时器
 
     (async function initDroneFlight() {
       try {
@@ -122,22 +123,44 @@
         viewer.trackedEntity = droneEntity; // 让摄像机跟随无人机（可选）
         viewer.zoomTo(droneEntity);
 
+
+        // 每隔 5 秒检测一次障碍物
+        // 启动定时检测（传入无人机实体）
+        // detector.startDetection(droneEntity);
+
+        // ===== 点击无人机切换检测开关 =====
+        // const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+        // handler.setInputAction((movement) => {
+        //   const pickedObject = viewer.scene.pick(movement.position);
+        //   if (Cesium.defined(pickedObject) && pickedObject.id === droneEntity) {
+        //     isDetectionEnabled = !isDetectionEnabled;
+        //     if (isDetectionEnabled) {
+        //       console.log("🚀 开启障碍物检测");
+        //       detector.startDetection(droneEntity);
+        //     } else {
+        //       console.log("🛑 停止障碍物检测");
+        //       detector.stopDetection(); // 如果 ObstacleDetector 提供 stop 方法
+        //     }
+        //   }
+        // }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
         // 初始化障碍物检测器
         const detector = new ObstacleDetector(viewer, {
           maxDistance: 200,
           maxResults: 5,
           rayType: 'spherical',
           entityLifetime: 3,
-          detectionInterval: 5000 // 5秒检测一次
+          detectionInterval: 5000,// 5秒检测一次
+          autoStopTimeout: 15000        // 15秒后自动停止
         });
 
         // 设置检测完成回调
         detector.setOnDetectionComplete((results) => {
           console.log(`✅ 检测到 ${results.length} 个障碍物`);
         });
-        // 每隔 5 秒检测一次障碍物
-        // 启动定时检测（传入无人机实体）
-        detector.startDetection(droneEntity);
+
+        // 启用点击控制（点击无人机实体来启动/停止检测）
+        detector.enableClickControl(droneEntity);
 
       } catch (error) {
         console.error("初始化无人机飞行时出错:", error);

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <!-- 引入你的二方包 -->
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+
+    // Your access token can be found at: https://ion.cesium.com/tokens.    
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        {
+          debugShowBoundingVolume: true,
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+    // 范围 & 分辨率
+    const minLat = 30.0;
+    const maxLat = 30.02; // 缩小范围方便示例
+    const minLon = 120.0;
+    const maxLon = 120.02;
+    const cellSizeKm = 1.0;
+    const cellHeightM = 1000; // 垂直间隔 1km
+    const verticalLayers = 3; // 垂直多少层
+
+    const dLat = cellSizeKm / 111.32;
+    const refLat = (minLat + maxLat) / 2;
+    const dLon = cellSizeKm / (111.32 * Math.cos(refLat * Math.PI / 180.0));
+
+    for (let lat = minLat; lat < maxLat; lat += dLat) {
+      for (let lon = minLon; lon < maxLon; lon += dLon) {
+        const latCenter = lat + dLat / 2;
+        const lonCenter = lon + dLon / 2;
+
+        for (let k = 0; k < verticalLayers; k++) {
+          const heightBase = k * cellHeightM;
+          const centerHeight = heightBase + cellHeightM / 2;
+
+          viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(lonCenter, latCenter, centerHeight),
+            box: {
+              dimensions: new Cesium.Cartesian3(cellSizeKm * 1000, cellSizeKm * 1000, cellHeightM),
+              material: Cesium.Color.fromRandom({ alpha: 0.3 }),
+              outline: true,
+              outlineColor: Cesium.Color.WHITE
+            }
+          });
+        }
+      }
+    }
+
+    viewer.zoomTo(viewer.entities);
+
+  </script>
+</body>
+
+</html>
