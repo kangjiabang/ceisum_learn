@@ -57,13 +57,13 @@
 
     // 无人机航线（经纬度+高度）
     const waypoints = [
-      { lon: 119.9980574, lat: 30.28275965, height: 300 },
-      { lon: 120.0005, lat: 30.2832, height: 300 },
-      { lon: 120.0020, lat: 30.2840, height: 300 },
-      { lon: 120.0040, lat: 30.2850, height: 200 },
-      { lon: 120.0060, lat: 30.2860, height: 200 },
-      { lon: 120.0080, lat: 30.2880, height: 200 },
-      { lon: 120.0100, lat: 30.2900, height: 200 }
+      { lon: 119.9980574, lat: 30.28275965, height: 100 },
+      { lon: 120.0005, lat: 30.2832, height: 100 },
+      { lon: 120.0020, lat: 30.2840, height: 100 },
+      { lon: 120.0040, lat: 30.2850, height: 100 },
+      { lon: 120.0060, lat: 30.2860, height: 100 },
+      { lon: 120.0080, lat: 30.2880, height: 100 },
+      { lon: 120.0100, lat: 30.2900, height: 100 }
     ];
 
     (async function initDroneFlight() {
@@ -195,66 +195,92 @@
         const startTime = viewer.clock.currentTime.clone();
         const stopTime = Cesium.JulianDate.addSeconds(startTime, 3, new Cesium.JulianDate());
 
-        rayResults.forEach((result, index) => {
-          const { rayInfo, hitPoint, distance, buildingHeight } = result;
+        if (rayResults.length > 0) {
+          // 按距离从小到大排序
+          rayResults.sort((a, b) => a.distance - b.distance);
 
-          // 显示射线
-          const rayEntity = viewer.entities.add({
-            availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
-              start: startTime,
-              stop: stopTime
-            })]),
-            polyline: {
-              positions: [
-                dronePositionCartesian,
-                Cesium.Cartesian3.add(
+          // 取最近的5个障碍物
+          const closestResults = rayResults.slice(0, 5);
+
+          closestResults.forEach((result, index) => {
+            const { rayInfo, hitPoint, distance, buildingHeight } = result;
+
+            // 显示射线
+            const rayEntity = viewer.entities.add({
+              availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
+                start: startTime,
+                stop: stopTime
+              })]),
+              polyline: {
+                positions: [
                   dronePositionCartesian,
-                  Cesium.Cartesian3.multiplyByScalar(rayInfo.direction, 500, new Cesium.Cartesian3()),
-                  new Cesium.Cartesian3()
-                )
-              ],
-              width: rayInfo.isCenterRay ? 6 : 4,
-              material: rayInfo.isCenterRay
-                ? new Cesium.PolylineOutlineMaterialProperty({
-                  color: Cesium.Color.RED,
-                  outlineColor: Cesium.Color.BLACK,
-                  outlineWidth: 1
-                })
-                : new Cesium.PolylineGlowMaterialProperty({
-                  color: Cesium.Color.BLUE.withAlpha(0.7),
-                  glowPower: 0.1
-                })
-            }
-          });
-          rayEntities.push(rayEntity);
+                  Cesium.Cartesian3.add(
+                    dronePositionCartesian,
+                    Cesium.Cartesian3.multiplyByScalar(rayInfo.direction, 500, new Cesium.Cartesian3()),
+                    new Cesium.Cartesian3()
+                  )
+                ],
+                width: rayInfo.isCenterRay ? 6 : 4,
+                material: rayInfo.isCenterRay
+                  ? new Cesium.PolylineOutlineMaterialProperty({
+                    color: Cesium.Color.RED,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 1
+                  })
+                  : new Cesium.PolylineGlowMaterialProperty({
+                    color: Cesium.Color.BLUE.withAlpha(0.7),
+                    glowPower: 0.1
+                  })
+              }
+            });
+            rayEntities.push(rayEntity);
 
-          // 显示碰撞点
-          const hitEntity = viewer.entities.add({
+            // 显示碰撞点
+            const hitEntity = viewer.entities.add({
+              availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
+                start: startTime,
+                stop: stopTime
+              })]),
+              position: hitPoint.position,
+              point: {
+                pixelSize: rayInfo.isCenterRay ? 30 : 20,
+                color: distance < 100 ? Cesium.Color.RED :
+                  distance < 200 ? Cesium.Color.ORANGE : Cesium.Color.YELLOW,
+                outlineColor: Cesium.Color.WHITE,
+                outlineWidth: 2
+              },
+              label: {
+                text: `高度: ${buildingHeight.toFixed(1)}m\n距离: ${distance.toFixed(1)}m`,
+                font: '12px sans-serif',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -30)
+              }
+            });
+            rayEntities.push(hitEntity);
+          });
+
+          // 添加统计信息
+          const statsEntity = viewer.entities.add({
             availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
               start: startTime,
               stop: stopTime
             })]),
-            position: hitPoint.position,
-            point: {
-              pixelSize: rayInfo.isCenterRay ? 30 : 20,
-              color: distance < 100 ? Cesium.Color.RED :
-                distance < 200 ? Cesium.Color.ORANGE : Cesium.Color.YELLOW,
-              outlineColor: Cesium.Color.WHITE,
-              outlineWidth: 2
-            },
+            position: dronePositionCartesian,
             label: {
-              text: `高度: ${buildingHeight.toFixed(1)}m\n距离: ${distance.toFixed(1)}m`,
-              font: '12px sans-serif',
-              fillColor: Cesium.Color.WHITE,
+              text: `检测到 ${rayResults.length} 个障碍物\n显示最近 ${closestResults.length} 个`,
+              font: '14px sans-serif',
+              fillColor: Cesium.Color.CYAN,
               outlineColor: Cesium.Color.BLACK,
               outlineWidth: 2,
               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-              pixelOffset: new Cesium.Cartesian2(0, -30)
+              pixelOffset: new Cesium.Cartesian2(0, 30)
             }
           });
-          rayEntities.push(hitEntity);
-        });
-      } else {
+          rayEntities.push(statsEntity);
+        }
         console.log("✅ 未检测到近距离障碍物，不显示射线");
       }
     }
