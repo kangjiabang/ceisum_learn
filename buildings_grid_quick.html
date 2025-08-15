@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+
+    // Access token
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 地形
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    // 加载 3D Tileset
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json", {
+        debugShowBoundingVolume: false,
+      })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    viewer.zoomTo(tileset);
+
+    // -------------------------------
+    // ✅ 使用 Primitive 批量绘制线框立方体（无报错）
+    // -------------------------------
+
+    const minLat = 30.261852568883025;
+    const maxLat = 30.31701791606819;
+    const minLon = 119.9384401375432;
+    const maxLon = 120.03013724921674;
+    const cellSizeKm = 0.1;         // 100米 × 100米
+    const cellHeightM = 100;        // 高度 100m
+    const verticalLayers = 3;       // 3 层
+
+    const dLat = cellSizeKm / 111.32;
+    const refLat = (minLat + maxLat) / 2;
+    const dLon = cellSizeKm / (111.32 * Math.cos(refLat * Math.PI / 180.0));
+
+    const halfSize = cellSizeKm * 1000 / 2; // 半边长（米）
+
+
+    // 替换你原来的 lineInstances 生成部分
+    const lineInstances = [];
+
+    // 定义 8 个局部顶点（在局部 ENU 坐标系中，单位：米）
+    const half = cellSizeKm * 1000 / 2; // 50 米
+    const cornersLocal = [
+      new Cesium.Cartesian3(-half, -half, -half), // 左前下
+      new Cesium.Cartesian3(half, -half, -half), // 右前下
+      new Cesium.Cartesian3(half, half, -half), // 右后下
+      new Cesium.Cartesian3(-half, half, -half), // 左后下
+      new Cesium.Cartesian3(-half, -half, half), // 左前上
+      new Cesium.Cartesian3(half, -half, half), // 右前上
+      new Cesium.Cartesian3(half, half, half), // 右后上
+      new Cesium.Cartesian3(-half, half, half)  // 左后上
+    ];
+
+    const edges = [
+      [0, 1], [1, 2], [2, 3], [3, 0], // 底面
+      [4, 5], [5, 6], [6, 7], [7, 4], // 顶面
+      [0, 4], [1, 5], [2, 6], [3, 7]  // 垂直边
+    ];
+
+    for (let lat = minLat; lat < maxLat; lat += dLat) {
+      for (let lon = minLon; lon < maxLon; lon += dLon) {
+        const latCenter = lat + dLat / 2;
+        const lonCenter = lon + dLon / 2;
+
+        for (let k = 0; k < verticalLayers; k++) {
+          const height = k * cellHeightM + cellHeightM / 2;
+
+          // 👉 关键：使用 cartographic + 变换矩阵
+          const cartographic = new Cesium.Cartographic(
+            Cesium.Math.toRadians(lonCenter),
+            Cesium.Math.toRadians(latCenter),
+            height
+          );
+
+          // 创建从 ENU（东-北-上）到 ECEF 的变换矩阵
+          const enuToEcef = Cesium.Transforms.eastNorthUpToFixedFrame(
+            Cesium.Cartographic.toCartesian(cartographic)
+          );
+
+          // 将局部顶点转换到世界坐标（ECEF）
+          const worldCorners = cornersLocal.map(localPoint => {
+            const worldPoint = new Cesium.Cartesian3();
+            Cesium.Matrix4.multiplyByPoint(enuToEcef, localPoint, worldPoint);
+            return worldPoint;
+          });
+
+          // 添加 12 条边
+          for (const [i, j] of edges) {
+            lineInstances.push(new Cesium.GeometryInstance({
+              geometry: new Cesium.PolylineGeometry({
+                positions: [worldCorners[i], worldCorners[j]],
+                width: 1
+              }),
+              attributes: {
+                color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+                  Cesium.Color.WHITE.withAlpha(0.15)
+                )
+              }
+            }));
+          }
+        }
+      }
+    }
+    // 创建 Primitive 批量渲染所有线段
+    const primitive = new Cesium.Primitive({
+      geometryInstances: lineInstances,
+      appearance: new Cesium.PolylineColorAppearance({
+        translucent: true
+      })
+    });
+
+    viewer.scene.primitives.add(primitive);
+    //viewer.zoomTo(primitive);
+
+  </script>
+</body>
+
+</html>

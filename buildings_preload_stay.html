@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json", {
+        debugShowBoundingVolume: false,
+      })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    viewer.zoomTo(tileset);
+
+    // 原始经纬度范围
+    const west = 119.9384401375432;
+    const east = 120.03013724921674;
+    const south = 30.261852568883025;
+    const north = 30.31701791606819;
+
+    // 设置网格行列数（更高表示粒度更细）
+    const rows = 4;
+    const cols = 4;
+
+    const lonStep = (east - west) / cols;
+    const latStep = (north - south) / rows;
+
+    const preloadRectangles = [];
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        const rect = Cesium.Rectangle.fromDegrees(
+          west + i * lonStep,
+          south + j * latStep,
+          west + (i + 1) * lonStep,
+          south + (j + 1) * latStep
+        );
+        preloadRectangles.push(rect);
+      }
+    }
+
+    const waitTime = 3000; // 每个小矩形等待 3 秒
+
+    async function preloadImageryAndTerrainHidden() {
+      console.log("开始隐藏预加载影像和地形...");
+
+      // 隐藏 viewer 渲染，用户看不到相机移动
+      viewer.container.style.visibility = "hidden";
+
+      for (let i = 0; i < preloadRectangles.length; i++) {
+        console.log(`预加载第 ${i + 1} 个小矩形区域`);
+
+        viewer.camera.setView({ destination: preloadRectangles[i] });
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
+      // 恢复显示
+      viewer.container.style.visibility = "visible";
+
+      console.log("隐藏预加载完成！");
+    }
+
+    preloadImageryAndTerrainHidden();
+
+  </script>
+</body>
+
+</html>

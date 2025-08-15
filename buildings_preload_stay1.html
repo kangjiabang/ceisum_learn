@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json", {
+        debugShowBoundingVolume: false,
+      })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    viewer.zoomTo(tileset);
+
+    // 原始经纬度范围
+    const west = 119.9384401375432;
+    const east = 120.03013724921674;
+    const south = 30.261852568883025;
+    const north = 30.31701791606819;
+
+    // 网格行列数
+    const rows = 4;
+    const cols = 4;
+
+    const lonStep = (east - west) / cols;
+    const latStep = (north - south) / rows;
+
+    const preloadRectangles = [];
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        preloadRectangles.push(Cesium.Rectangle.fromDegrees(
+          west + i * lonStep,
+          south + j * latStep,
+          west + (i + 1) * lonStep,
+          south + (j + 1) * latStep
+        ));
+      }
+    }
+
+    const waitTime = 3000; // 每个小矩形等待时间
+
+    // 离屏相机对象
+    const offscreenCamera = new Cesium.Camera(viewer.scene);
+
+    async function preloadImageryAndTerrainOffscreen_old() {
+      console.log("开始离屏预加载...");
+
+      for (let i = 0; i < preloadRectangles.length; i++) {
+
+        const rect = preloadRectangles[i];
+
+        console.log(`预加载第 ${i + 1} 个小矩形区域`);
+
+        // 自动计算相机位置，让整个矩形可见
+        const cameraCoordinates = Cesium.Camera.computeViewRectangle(
+          viewer.scene.globe.ellipsoid,
+          rect
+        );
+
+        offscreenCamera.setView({
+          destination: cameraCoordinates
+        });
+
+
+        // 离屏相机设置目标矩形
+        offscreenCamera.setView({ destination: preloadRectangles[i] });
+
+        // 触发场景瓦片加载
+        viewer.scene.requestRender();
+
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
+      console.log("离屏预加载完成！");
+    }
+
+
+    async function preloadImageryAndTerrainOffscreen() {
+      console.log("开始离屏预加载高精度...");
+
+      for (let i = 0; i < preloadRectangles.length; i++) {
+        const rect = preloadRectangles[i];
+        console.log(`预加载第 ${i + 1} 个小矩形区域`);
+
+        // 计算矩形中心点
+        const centerLon = Cesium.Math.toDegrees((rect.east + rect.west) / 2);
+        const centerLat = Cesium.Math.toDegrees((rect.north + rect.south) / 2);
+
+        // 计算矩形的近似尺寸（米）
+        const rectWidth = Cesium.Math.toRadians(rect.east - rect.west) * Cesium.Ellipsoid.WGS84.maximumRadius;
+        const rectHeight = Cesium.Math.toRadians(rect.north - rect.south) * Cesium.Ellipsoid.WGS84.maximumRadius;
+        const maxDim = Math.max(rectWidth, rectHeight);
+
+        // 理论上刚好能看到整个矩形的高度（经验公式）
+        let optimalHeight = maxDim / Math.tan(Cesium.Math.toRadians(viewer.camera.frustum.fovy / 2));
+
+        // 为了加载更高精度瓦片，把高度压低，比如到 0.3 倍
+        optimalHeight *= 0.3;
+
+        // 离屏相机定位到更低高度
+        offscreenCamera.setView({
+          destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, optimalHeight)
+        });
+
+        // 触发渲染和加载
+        viewer.scene.requestRender();
+
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
+      console.log("高精度离屏预加载完成！");
+    }
+
+
+    preloadImageryAndTerrainOffscreen();
+
+  </script>
+</body>
+
+</html>

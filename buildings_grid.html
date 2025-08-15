@@ -41,7 +41,7 @@
       await Cesium.Cesium3DTileset.fromUrl(
         "http://192.168.4.78:8000/tileset.json",
         {
-          debugShowBoundingVolume: true,
+          debugShowBoundingVolume: false,
         })
     );
 
@@ -53,12 +53,12 @@
     viewer.zoomTo(tileset);
 
     // 范围 & 分辨率
-    const minLat = 30.0;
-    const maxLat = 30.02; // 缩小范围方便示例
-    const minLon = 120.0;
-    const maxLon = 120.02;
-    const cellSizeKm = 1.0;
-    const cellHeightM = 1000; // 垂直间隔 1km
+    const minLat = 30.261852568883025;
+    const maxLat = 30.31701791606819; // 缩小范围方便示例
+    const minLon = 119.9384401375432;
+    const maxLon = 120.03013724921674;
+    const cellSizeKm = 0.1;
+    const cellHeightM = 100; // 垂直间隔 100m
     const verticalLayers = 3; // 垂直多少层
 
     const dLat = cellSizeKm / 111.32;
@@ -78,9 +78,10 @@
             position: Cesium.Cartesian3.fromDegrees(lonCenter, latCenter, centerHeight),
             box: {
               dimensions: new Cesium.Cartesian3(cellSizeKm * 1000, cellSizeKm * 1000, cellHeightM),
-              material: Cesium.Color.fromRandom({ alpha: 0.3 }),
+              //material: Cesium.Color.BLUE.withAlpha(0.1),   // ✅ 透明蓝色
+              material: new Cesium.Color(1, 1, 1, 0), // 完全透明（alpha = 0）
               outline: true,
-              outlineColor: Cesium.Color.WHITE
+              outlineColor: Cesium.Color.WHITE.withAlpha(0.15)             // 超淡白边框
             }
           });
         }

@@ -14,7 +14,8 @@
     "cesium": "^1.130.0",
     "cesium-drone-path": "file:../../ceisum_drone_path/cesium-drone-path-1.0.0.tgz",
     "tape": "^5.9.0",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "wellknown": "^0.5.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.3",

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <!-- 引入你的二方包 -->
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+
+    // 导入二方包
+    import { getNearstBuildingsWithinDistance } from './src/poligon_infos_intersect_distance.js';
+    import * as turf from '@turf/turf';
+
+    // Your access token can be found at: https://ion.cesium.com/tokens.    
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        {
+          debugShowBoundingVolume: true,
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+    let droneEntity = null;
+    let detectionIntervalId = null;
+
+    // 无人机航线（经纬度+高度）
+    const waypoints = [
+      { lon: 119.9980574, lat: 30.28275965, height: 100 },
+      { lon: 120.0005, lat: 30.2832, height: 100 },
+      { lon: 120.0020, lat: 30.2840, height: 100 },
+      { lon: 120.0040, lat: 30.2850, height: 100 },
+      { lon: 120.0060, lat: 30.2860, height: 100 },
+      { lon: 120.0080, lat: 30.2880, height: 100 },
+      { lon: 120.0100, lat: 30.2900, height: 100 }
+    ];
+
+    let isDetectionEnabled = false; // 初始不检测
+    let autoStopTimer = null;       // 60 秒自动停止定时器
+    // === 在 initDroneFlight 内部定义一个变量来保存当前高亮的建筑 ===
+    let highlightedBuildingEntity = null;
+
+    (async function initDroneFlight() {
+      try {
+        // 构建航迹
+        const positionProperty = new Cesium.SampledPositionProperty();
+        let startTime = Cesium.JulianDate.now();
+        let timeStep = 10; // 每段航点的飞行时间（秒）
+
+        for (let i = 0; i < waypoints.length; i++) {
+          const wp = waypoints[i];
+          const terrainSample = await Cesium.sampleTerrainMostDetailed(
+            viewer.terrainProvider,
+            [new Cesium.Cartographic(
+              Cesium.Math.toRadians(wp.lon),
+              Cesium.Math.toRadians(wp.lat)
+            )]
+          );
+          const terrainHeight = terrainSample[0].height;
+
+          const pos = Cesium.Cartesian3.fromDegrees(wp.lon, wp.lat, wp.height);
+          const time = Cesium.JulianDate.addSeconds(startTime, i * timeStep, new Cesium.JulianDate());
+          positionProperty.addSample(time, pos);
+        }
+
+        // 设置飞行时间范围
+        const totalTime = timeStep * (waypoints.length - 1);
+        viewer.clock.startTime = startTime.clone();
+        viewer.clock.stopTime = Cesium.JulianDate.addSeconds(startTime, totalTime, new Cesium.JulianDate());
+        viewer.clock.currentTime = startTime.clone();
+        viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP; // 循环
+        viewer.clock.multiplier = 1 * 0.5; // 时间倍率
+
+        // 无人机模型
+        droneEntity = viewer.entities.add({
+          availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
+            start: viewer.clock.startTime,
+            stop: viewer.clock.stopTime
+          })]),
+          position: positionProperty,
+          orientation: new Cesium.VelocityOrientationProperty(positionProperty),
+          model: {
+            uri: "models/drone_costum.glb",
+            scale: 5.0,
+            minimumPixelSize: 64,
+            allowPicking: false // 关键
+          },
+          label: {
+            text: `⚠️ 无人机模型`,
+            font: '14px sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            backgroundColor: Cesium.Color.RED,
+            backgroundOpacity: 0.7,
+            showBackground: true,
+            pixelOffset: new Cesium.Cartesian2(0, -50),
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            scale: 0.8
+          }
+        });
+
+        viewer.clock.shouldAnimate = true; // 启动时间动画
+        viewer.trackedEntity = droneEntity; // 让摄像机跟随无人机（可选）
+        viewer.zoomTo(droneEntity);
+
+        // === 4. 启动实时障碍物检测 ===
+        const detectionRadius = 50; // 检测半径（米）
+        let lastCheckTime = 0;
+
+        // 每秒检测一次
+        viewer.clock.onTick.addEventListener(function (clock) {
+          const currentTime = clock.currentTime;
+          const currentTimeSeconds = Cesium.JulianDate.toDate(currentTime).getTime() / 1000;
+
+          // 避免过于频繁检测（例如：每秒一次）
+          if (currentTimeSeconds - lastCheckTime < 1) return;
+          lastCheckTime = currentTimeSeconds;
+
+          // 获取无人机当前位置
+          const position = droneEntity.position.getValue(currentTime);
+          if (!position) {
+            console.log("无法获取无人机当前位置");
+            return;
+          }
+
+          // 转为经纬度
+          const cartographic = Cesium.Cartographic.fromCartesian(position);
+          if (!cartographic) return;
+
+          const lon = Cesium.Math.toDegrees(cartographic.longitude);
+          const lat = Cesium.Math.toDegrees(cartographic.latitude);
+
+          // 构造 GeoJSON Point Feature
+          // const dronePoint = {
+          //   type: 'Feature',
+          //   geometry: {
+          //     type: 'Point',
+          //     coordinates: [lon, lat]
+          //   }
+          // };
+
+          const dronePoint = turf.point([lon, lat]);
+
+          // 查询范围内的建筑物
+          // getBuildingsWithinDistance(dronePoint, detectionRadius)
+          //   .then(result => {
+          //     if (result.length > 0) {
+          //       console.warn(`⚠️ 无人机附近 ${detectionRadius} 米内发现 ${result.length} 个建筑物！`);
+          //       result.forEach((item, i) => {
+          //         console.log(`  ${i + 1}. ID: ${item.polygon.properties.id}, 距离: ${item.distanceInMeters.toFixed(2)} 米, 高度: ${item.polygon.properties.height} 米`);
+          //       });
+
+          //       // TODO: 可在此触发告警、变色、停止飞行等
+          //     } else {
+          //       console.log(`✅ 无人机安全飞行中，${detectionRadius} 米内无建筑物`);
+          //     }
+          //   })
+          //   .catch(err => {
+          //     console.error("检测建筑物时出错:", err);
+          //   });
+
+          getNearstBuildingsWithinDistance(dronePoint, detectionRadius, cartographic.height)
+            .then(nearest => {
+              if (nearest) {
+
+                // 找到最近的建筑
+                console.warn(
+                  `⚠️ 最近建筑: ID=${nearest.polygon.properties.id}, ` +
+                  `水平距离=${nearest.distanceInMeters.toFixed(2)}米, 高度=${nearest.polygon.properties.height}米, ` +
+                  `无人机高度=${cartographic.height.toFixed(2)}米, 实际距离=${nearest.actualDistance.toFixed(2)}米`
+                );
+
+                const coordinates = parseWKTCoordinates(nearest.polygon.properties.wkt);
+                if (!coordinates) return;
+
+                if (highlightedBuildingEntity) {
+                  viewer.entities.remove(highlightedBuildingEntity);
+                }
+
+                const coords = bufferPolygon(coordinates, 2);
+                highlightedBuildingEntity = viewer.entities.add({
+                  name: `高亮建筑 ID: ${nearest.polygon.properties.id}`,
+                  polygon: {
+                    hierarchy: Cesium.Cartesian3.fromDegreesArray(coords),
+                    extrudedHeight: nearest.polygon.properties.height,
+                    height: 10,
+                    material: Cesium.Color.RED.withAlpha(0.5),
+                    outline: true,
+                    outlineColor: Cesium.Color.YELLOW,
+                    outlineWidth: 5,
+                    classificationType: Cesium.ClassificationType.BOTH
+                  },
+                  label: {
+                    text: `⚠️ 障碍物\n实际距离: ${nearest.actualDistance.toFixed(1)}m\n高度: ${nearest.polygon.properties.height}m`,
+                    font: '14px sans-serif',
+                    fillColor: Cesium.Color.WHITE,
+                    backgroundColor: Cesium.Color.RED,
+                    backgroundOpacity: 0.7,
+                    showBackground: true,
+                    pixelOffset: new Cesium.Cartesian2(0, -50),
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    scale: 0.8
+                  }
+                });
+
+              } else {
+                if (highlightedBuildingEntity) {
+                  viewer.entities.remove(highlightedBuildingEntity);
+                  highlightedBuildingEntity = null;
+                }
+                console.log(`✅ 无人机安全飞行中，${detectionRadius} 米内无建筑物`);
+              }
+            })
+            .catch(err => {
+              console.error("检测建筑物时出错:", err);
+            });
+        });
+
+
+      } catch (error) {
+        console.error("初始化无人机飞行时出错:", error);
+      }
+    })();
+
+    function bufferPolygon(coordinates, distance) {
+      // 添加新的高亮建筑
+      let coords = coordinates;
+
+      // 使用 turf 对原建筑轮廓做缓冲（单位：米）
+      try {
+        // 把 coordinates 转成 [[lon, lat], [lon, lat], ...]
+        const coordPairs = [];
+        for (let i = 0; i < coords.length; i += 2) {
+          coordPairs.push([coords[i], coords[i + 1]]);
+        }
+
+        // 用原始坐标构造 Polygon（GeoJSON 格式要求外环闭合，所以最后一个点要等于第一个点）
+        if (coordPairs[0][0] !== coordPairs[coordPairs.length - 1][0] ||
+          coordPairs[0][1] !== coordPairs[coordPairs.length - 1][1]) {
+          coordPairs.push(coordPairs[0]);
+        }
+
+        const polygonGeoJSON = turf.polygon([coordPairs]);
+
+        // 缓冲 distance 米（可以改成更大）
+        const buffered = turf.buffer(polygonGeoJSON, distance, { units: 'meters' });
+
+        // 从缓冲后的多边形取新坐标（只取外环）
+        const bufferedCoords = buffered.geometry.coordinates[0].flatMap(coord => [coord[0], coord[1]]);
+
+        coords = bufferedCoords;
+        return coords;
+      } catch (err) {
+        console.error('缓冲建筑失败:', err);
+      }
+    }
+
+    function parseWKTCoordinates(wkt) {
+      try {
+        // 移除可能的引号
+        const cleanWkt = wkt.replace(/^"|"$/g, '').trim();
+        console.log('解析WKT:', cleanWkt);
+
+        const match = cleanWkt.match(/\(\(\(([^)]+)\)\)\)/);
+        if (!match) {
+          console.warn('无法解析 WKT 格式:', cleanWkt);
+          return null;
+        }
+
+        const coordsStr = match[1];
+        const coordPairs = coordsStr.split(',');
+        const coordinates = [];
+
+        for (let pair of coordPairs) {
+          const trimmedPair = pair.trim();
+          if (trimmedPair) {
+            const [lonStr, latStr] = trimmedPair.split(' ');
+            const lon = parseFloat(lonStr);
+            const lat = parseFloat(latStr);
+
+            // 验证坐标是否有效
+            if (!isNaN(lon) && !isNaN(lat) && isFinite(lon) && isFinite(lat)) {
+              coordinates.push(lon, lat);
+            } else {
+              console.warn('无效坐标:', lonStr, latStr);
+              return null;
+            }
+          }
+        }
+
+        // 确保坐标数组长度为偶数且不为空
+        if (coordinates.length === 0 || coordinates.length % 2 !== 0) {
+          console.warn('坐标数组长度不正确:', coordinates);
+          return null;
+        }
+
+        console.log('成功解析坐标:', coordinates);
+        return coordinates;
+      } catch (error) {
+        console.error('解析 WKT 坐标时出错:', error);
+        return null;
+      }
+    }
+
+
+  </script>
+</body>
+
+</html>

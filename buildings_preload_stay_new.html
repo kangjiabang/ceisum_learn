@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider,
+      requestRenderMode: false // 确保每帧都渲染，不等事件
+    });
+
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json", {
+        debugShowBoundingVolume: false,
+      })
+    );
+
+    viewer.zoomTo(tileset);
+
+    // 经纬度范围
+    const west = 119.9384401375432;
+    const east = 120.03013724921674;
+    const south = 30.261852568883025;
+    const north = 30.31701791606819;
+
+    // 网格数
+    const rows = 4;
+    const cols = 4;
+
+    const lonStep = (east - west) / cols;
+    const latStep = (north - south) / rows;
+
+    // 生成格子
+    const preloadRectangles = [];
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        preloadRectangles.push(Cesium.Rectangle.fromDegrees(
+          west + i * lonStep,
+          south + j * latStep,
+          west + (i + 1) * lonStep,
+          south + (j + 1) * latStep
+        ));
+      }
+    }
+
+    async function preloadHighResTiles() {
+      console.log("开始离屏高精度预加载...");
+
+      const originalView = {
+        destination: viewer.camera.positionWC.clone(),
+        orientation: {
+          direction: viewer.camera.direction.clone(),
+          up: viewer.camera.up.clone()
+        }
+      };
+
+      // 创建离屏相机
+      const offscreenCamera = new Cesium.Camera(viewer.scene);
+
+      for (let i = 0; i < preloadRectangles.length; i++) {
+        const rect = preloadRectangles[i];
+
+        const centerLon = Cesium.Math.toDegrees((rect.east + rect.west) / 2);
+        const centerLat = Cesium.Math.toDegrees((rect.north + rect.south) / 2);
+
+        const rectWidth = Cesium.Math.toRadians(rect.east - rect.west) * Cesium.Ellipsoid.WGS84.maximumRadius;
+        const rectHeight = Cesium.Math.toRadians(rect.north - rect.south) * Cesium.Ellipsoid.WGS84.maximumRadius;
+        const maxDim = Math.max(rectWidth, rectHeight);
+
+        let optimalHeight = maxDim / Math.tan(Cesium.Math.toRadians(viewer.camera.frustum.fovy / 2));
+        optimalHeight *= 0.3;
+
+        // 用离屏相机设置视图
+        offscreenCamera.setView({
+          destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, optimalHeight)
+        });
+
+        // 渲染时强制用离屏相机
+        const savedCamera = viewer.scene.camera;
+        viewer.scene.camera = offscreenCamera;
+        for (let frame = 0; frame < 3; frame++) {
+          viewer.scene.render();
+        }
+        viewer.scene.camera = savedCamera;
+
+        await new Promise(res => setTimeout(res, 500));
+      }
+
+      // 恢复原视角
+      //viewer.camera.setView(originalView);
+
+      console.log("高精度预加载完成！");
+    }
+
+    preloadHighResTiles();
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // 导入二方包
+    import { ObstacleDetector } from '@your-org/drone-obstacle-detector';
+
+    // Your access token can be found at: https://ion.cesium.com/tokens.      
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "http://192.168.4.78:8000/tileset.json",
+        {
+          debugShowBoundingVolume: true,
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+    // 多个无人机实体数组
+    let droneEntities = [];
+    let detectors = []; // 对应的检测器数组
+
+    // 多个无人机航线（经纬度+高度）
+    const droneRoutes = [
+      {
+        id: 1,
+        waypoints: [
+          { lon: 119.9980574, lat: 30.28275965, height: 100 },
+          { lon: 120.0005, lat: 30.2832, height: 100 },
+          { lon: 120.0020, lat: 30.2840, height: 100 },
+          { lon: 120.0040, lat: 30.2850, height: 100 }
+        ],
+        color: Cesium.Color.RED,
+        modelUri: "models/drone_costum.glb"
+      },
+      {
+        id: 2,
+        waypoints: [
+          { lon: 120.0040, lat: 30.2850, height: 150 },
+          { lon: 120.0060, lat: 30.2860, height: 150 },
+          { lon: 120.0080, lat: 30.2880, height: 150 },
+          { lon: 120.0100, lat: 30.2900, height: 150 }
+        ],
+        color: Cesium.Color.BLUE,
+        modelUri: "models/drone_costum.glb"
+      },
+      {
+        id: 3,
+        waypoints: [
+          { lon: 120.0100, lat: 30.2900, height: 80 },
+          { lon: 120.0120, lat: 30.2920, height: 80 },
+          { lon: 120.0140, lat: 30.2940, height: 80 },
+          { lon: 120.0160, lat: 30.2960, height: 80 }
+        ],
+        color: Cesium.Color.GREEN,
+        modelUri: "models/drone_costum.glb"
+      }
+    ];
+
+    // 无人机间碰撞检测
+    function checkDroneCollisions() {
+      const collisionThreshold = 50; // 碰撞检测阈值（米）
+      const currentTime = viewer.clock.currentTime;
+
+      for (let i = 0; i < droneEntities.length; i++) {
+        for (let j = i + 1; j < droneEntities.length; j++) {
+          const drone1 = droneEntities[i];
+          const drone2 = droneEntities[j];
+
+          const pos1 = drone1.position.getValue(currentTime);
+          const pos2 = drone2.position.getValue(currentTime);
+
+          if (pos1 && pos2) {
+            const distance = Cesium.Cartesian3.distance(pos1, pos2);
+            if (distance < collisionThreshold) {
+              console.warn(`⚠️ 无人机 ${drone1._customId} 和 无人机 ${drone2._customId} 可能发生碰撞！距离: ${distance.toFixed(2)}米`);
+
+              // 可以在这里添加视觉警告
+              showCollisionWarning(pos1, pos2, distance);
+            }
+          }
+        }
+      }
+    }
+
+    // 显示碰撞警告
+    function showCollisionWarning(pos1, pos2, distance) {
+      const midpoint = new Cesium.Cartesian3();
+      Cesium.Cartesian3.midpoint(pos1, pos2, midpoint);
+
+      const warningEntity = viewer.entities.add({
+        position: midpoint,
+        point: {
+          pixelSize: 30,
+          color: Cesium.Color.YELLOW.withAlpha(0.8),
+          outlineColor: Cesium.Color.RED,
+          outlineWidth: 2
+        },
+        label: {
+          text: `⚠️ 碰撞警告!\n距离: ${distance.toFixed(2)}m`,
+          font: '14px sans-serif',
+          fillColor: Cesium.Color.RED,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -40)
+        }
+      });
+
+      // 3秒后移除警告
+      setTimeout(() => {
+        viewer.entities.remove(warningEntity);
+      }, 3000);
+    }
+
+    // 启动无人机间碰撞检测
+    setInterval(checkDroneCollisions, 1000); // 每秒检测一次
+
+    (async function initMultiDroneFlight() {
+      try {
+        const startTime = Cesium.JulianDate.now();
+        let maxTotalTime = 0;
+
+        // 为每个无人机创建飞行路径
+        for (const route of droneRoutes) {
+          // 构建航迹
+          const positionProperty = new Cesium.SampledPositionProperty();
+          let timeStep = 10; // 每段航点的飞行时间（秒）
+
+          for (let i = 0; i < route.waypoints.length; i++) {
+            const wp = route.waypoints[i];
+            const terrainSample = await Cesium.sampleTerrainMostDetailed(
+              viewer.terrainProvider,
+              [new Cesium.Cartographic(
+                Cesium.Math.toRadians(wp.lon),
+                Cesium.Math.toRadians(wp.lat)
+              )]
+            );
+            const terrainHeight = terrainSample[0].height;
+
+            const pos = Cesium.Cartesian3.fromDegrees(wp.lon, wp.lat, wp.height);
+            const time = Cesium.JulianDate.addSeconds(startTime, i * timeStep, new Cesium.JulianDate());
+            positionProperty.addSample(time, pos);
+          }
+
+          // 计算该无人机的飞行时间
+          const totalTime = timeStep * (route.waypoints.length - 1);
+          if (totalTime > maxTotalTime) {
+            maxTotalTime = totalTime;
+          }
+
+          // 创建无人机实体
+          const droneEntity = viewer.entities.add({
+            id: `drone_${route.id}`, // ✅ 正确：在创建时设置 id
+            availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
+              start: startTime.clone(),
+              stop: Cesium.JulianDate.addSeconds(startTime, totalTime, new Cesium.JulianDate())
+            })]),
+            position: positionProperty,
+            orientation: new Cesium.VelocityOrientationProperty(positionProperty),
+            model: {
+              uri: route.modelUri,
+              scale: 5.0,
+              minimumPixelSize: 64,
+              color: route.color.withAlpha(0.8),
+              allowPicking: true
+            },
+            label: {
+              text: `无人机 ${route.id}`,
+              font: '12px sans-serif',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, 30)
+            }
+          });
+
+          // ✅ 正确：使用自定义属性存储 ID
+          droneEntity._customId = route.id;
+          droneEntities.push(droneEntity);
+
+          // 为每个无人机创建独立的障碍物检测器
+          const detector = new ObstacleDetector(viewer, {
+            maxDistance: 200,
+            maxResults: 5,
+            rayType: 'spherical',
+            entityLifetime: 3,
+            detectionInterval: 5000, // 5秒检测一次
+            autoStopTimeout: 15000    // 15秒后自动停止
+          });
+
+          // 设置检测完成回调
+          detector.setOnDetectionComplete((results) => {
+            console.log(`✅ 无人机 ${route.id} 检测到 ${results.length} 个障碍物`);
+          });
+
+          detectors.push(detector);
+
+          // 启用点击控制（点击无人机实体来启动/停止检测）
+          detector.enableClickControl(droneEntity);
+        }
+
+        // 设置统一的时钟范围
+        viewer.clock.startTime = startTime.clone();
+        viewer.clock.stopTime = Cesium.JulianDate.addSeconds(startTime, maxTotalTime, new Cesium.JulianDate());
+        viewer.clock.currentTime = startTime.clone();
+        viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP; // 循环
+        viewer.clock.multiplier = 1 * 0.5; // 时间倍率
+
+        viewer.clock.shouldAnimate = true; // 启动时间动画
+
+        // 定位到第一个无人机
+        if (droneEntities.length > 0) {
+          viewer.zoomTo(droneEntities[0]);
+        }
+
+      } catch (error) {
+        console.error("初始化多无人机飞行时出错:", error);
+      }
+    })();
+
+  </script>
+</body>
+
+</html>
