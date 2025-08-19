@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Cesium + Heatmap 建筑拥挤度</title>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/heatmap.js@2.0.5/build/heatmap.min.js"></script>
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #cesiumContainer,
+    #heatmapContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #heatmapContainer {
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #heatmapContainer canvas {
+      background: transparent !important;
+    }
+
+    #toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      background: rgba(42, 42, 42, 0.8);
+      padding: 5px;
+      border-radius: 5px;
+      color: white;
+    }
+
+    button {
+      padding: 5px 10px;
+      margin: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="heatmapContainer"></div>
+  <div id="toolbar">
+    <button id="refreshBtn">刷新热力图</button>
+    <div>半径: <input type="range" id="radiusSlider" min="10" max="100" value="50"></div>
+  </div>
+
+  <script type="module">
+    import CesiumHeatmap from './js/CesiumHeatmap.js';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+
+      Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(1),
+        timeline: false, animation: false, baseLayerPicker: false
+      });
+      viewer.cesiumWidget.creditContainer.style.display = "none";
+
+      const tileset = viewer.scene.primitives.add(
+        await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json", { debugShowBoundingVolume: true })
+      );
+      viewer.zoomTo(tileset);
+
+      // 初始化热力图库
+      const heatmap = new CesiumHeatmap({
+        viewer,                     // 必填
+        heatmapContainerId: 'heatmapContainer',
+        dataFile: '../../assets/buildings_output.txt',
+        radius: 50
+      });
+
+      await heatmap.init();
+
+      // 动态修改半径
+      document.getElementById('radiusSlider').addEventListener('input', (e) => {
+        heatmap.setRadius(parseInt(e.target.value));
+      });
+
+      // 刷新数据
+      document.getElementById('refreshBtn').addEventListener('click', async () => {
+        await heatmap.loadBuildings(); // 重新加载文件
+      });
+    });
+  </script>
+</body>
+
+</html>

@@ -88,7 +88,7 @@
 
       // ========== 核心修改: 从 output.txt 获取建筑数据 ==========
       async function loadBuildings() {
-        const resp = await fetch('output.txt');
+        const resp = await fetch('../../assets/buildings_output.txt');
         const text = await resp.text();
         const lines = text.trim().split('\n');
 
@@ -151,6 +151,7 @@
 
       document.getElementById('radiusSlider').addEventListener('input', (e) => {
         const radius = Math.max(10, Math.min(parseInt(e.target.value), 200));
+        console.log(`半径大小radius:${radius}`);
         const container = document.getElementById('heatmapContainer');
         container.innerHTML = '';
         heatmapInstance = h337.create({
