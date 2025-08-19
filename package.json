@@ -13,6 +13,7 @@
     "@turf/turf": "^7.2.0",
     "cesium": "^1.130.0",
     "cesium-drone-path": "file:../../ceisum_drone_path/cesium-drone-path-1.0.0.tgz",
+    "cesium-heatmap-es6": "^0.8.0",
     "tape": "^5.9.0",
     "vue": "^3.5.13",
     "wellknown": "^0.5.0"

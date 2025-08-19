@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Cesium + heatmap.js 实时绑定（透明背景）</title>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/heatmap.js@2.0.5/build/heatmap.min.js"></script>
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #cesiumContainer,
+    #heatmapContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #heatmapContainer {
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #heatmapContainer canvas {
+      background: transparent !important;
+    }
+
+    #toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      background: rgba(42, 42, 42, 0.8);
+      padding: 5px;
+      border-radius: 5px;
+      color: white;
+    }
+
+    button {
+      padding: 5px 10px;
+      margin: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="heatmapContainer"></div>
+  <div id="toolbar">
+    <button id="refreshBtn">刷新热力图</button>
+    <div>半径: <input type="range" id="radiusSlider" min="10" max="100" value="50"></div>
+  </div>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+
+      Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(1),
+        timeline: false, animation: false, baseLayerPicker: false
+      });
+      viewer.cesiumWidget.creditContainer.style.display = "none";
+
+      viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(-120, 30, -80, 50) });
+
+      let heatmapInstance = h337.create({
+        container: document.getElementById('heatmapContainer'),
+        radius: 50,
+        maxOpacity: 0.8,
+        minOpacity: 0.3,
+        blur: 0.85,
+        gradient: { '0.1': 'blue', '0.3': 'cyan', '0.5': 'lime', '0.7': 'yellow', '1.0': 'red' }
+      });
+
+      function generateData() {
+        const points = [];
+        const west = -120, east = -80, south = 30, north = 50;
+        for (let i = 0; i < 200; i++) points.push({ lng: west + Math.random() * (east - west), lat: south + Math.random() * (north - south), value: 30 + Math.random() * 70 });
+        for (let i = 0; i < 3; i++) {
+          const centerLng = west + Math.random() * (east - west);
+          const centerLat = south + Math.random() * (north - south);
+          for (let j = 0; j < 20; j++) points.push({ lng: centerLng + (Math.random() - 0.5) * 2, lat: centerLat + (Math.random() - 0.5) * 2, value: 70 + Math.random() * 30 });
+        }
+        return points;
+      }
+
+      let heatmapData = generateData();
+
+      // 节流更新
+      let lastUpdate = 0;
+      function updateHeatmap() {
+        const now = performance.now();
+        if (now - lastUpdate < 50) return; // 50ms 节流
+        lastUpdate = now;
+
+        const data = { max: 100, min: 0, data: [] };
+        heatmapData.forEach(point => {
+          const pos = Cesium.Cartesian3.fromDegrees(point.lng, point.lat);
+          const pixel = viewer.scene.cartesianToCanvasCoordinates(pos);
+          if (pixel && isFinite(pixel.x) && isFinite(pixel.y)) {
+            data.data.push({ x: Math.floor(pixel.x), y: Math.floor(pixel.y), value: point.value });
+          }
+        });
+
+        heatmapInstance._renderer.setDimensions(viewer.canvas.clientWidth, viewer.canvas.clientHeight);
+        heatmapInstance.setData(data);
+      }
+
+      viewer.scene.postRender.addEventListener(updateHeatmap);
+      window.addEventListener('resize', updateHeatmap);
+
+      // 刷新数据
+      document.getElementById('refreshBtn').addEventListener('click', () => {
+        heatmapData = generateData();
+        updateHeatmap();
+      });
+
+      // 动态修改半径
+      document.getElementById('radiusSlider').addEventListener('input', (e) => {
+        const radius = Math.max(10, Math.min(parseInt(e.target.value), 200)); // 限制合理范围
+        const container = document.getElementById('heatmapContainer');
+        container.innerHTML = ''; // 清空旧 heatmap
+        heatmapInstance = h337.create({
+          container,
+          radius,
+          maxOpacity: 0.8,
+          minOpacity: 0.3,
+          blur: 0.85,
+          gradient: { '0.1': 'blue', '0.3': 'cyan', '0.5': 'lime', '0.7': 'yellow', '1.0': 'red' }
+        });
+        updateHeatmap();
+      });
+
+      updateHeatmap();
+    });
+  </script>
+</body>
+
+</html>

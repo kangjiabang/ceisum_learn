@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Cesium + heatmap.js 实时绑定（透明背景）</title>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/heatmap.js@2.0.5/build/heatmap.min.js"></script>
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #heatmapContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: none;
+      /* 离屏渲染 */
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="heatmapContainer"></div>
+
+  <script>
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+    const viewer = new Cesium.Viewer('cesiumContainer', {
+      imageryProvider: new Cesium.IonImageryProvider({ assetId: 1 }),
+      baseLayerPicker: false
+    });
+
+    const heatmapContainer = document.getElementById('heatmapContainer');
+
+    function resizeHeatmapCanvas() {
+      heatmapContainer.style.width = viewer.canvas.width + 'px';
+      heatmapContainer.style.height = viewer.canvas.height + 'px';
+    }
+    resizeHeatmapCanvas();
+
+    const heatmapInstance = h337.create({
+      container: heatmapContainer,
+      radius: 20,
+      maxOpacity: 0.8,
+      minOpacity: 0,
+      blur: 0.75,
+      backgroundColor: 'rgba(0,0,0,0)', // 强制透明背景
+      gradient: {
+        '0.0': 'rgba(0,0,0,0)',
+        '0.5': 'blue',
+        '0.8': 'red',
+        '1.0': 'white'
+      }
+    });
+
+    const points = [
+      { lon: 116.4, lat: 39.9, value: 80 },
+      { lon: 116.42, lat: 39.91, value: 60 },
+      { lon: 116.39, lat: 39.92, value: 90 }
+    ];
+
+    let heatmapEntity;
+
+    function updateHeatmap() {
+      resizeHeatmapCanvas();
+
+      const rectangle = viewer.camera.computeViewRectangle();
+      if (!rectangle) return;
+
+      const west = Cesium.Math.toDegrees(rectangle.west);
+      const south = Cesium.Math.toDegrees(rectangle.south);
+      const east = Cesium.Math.toDegrees(rectangle.east);
+      const north = Cesium.Math.toDegrees(rectangle.north);
+
+      const width = heatmapContainer.offsetWidth;
+      const height = heatmapContainer.offsetHeight;
+
+      const heatmapData = [];
+      points.forEach(p => {
+        if (p.lon >= west && p.lon <= east && p.lat >= south && p.lat <= north) {
+          const x = Math.floor((p.lon - west) / (east - west) * width);
+          const y = Math.floor((north - p.lat) / (north - south) * height);
+          heatmapData.push({ x, y, value: p.value });
+        }
+      });
+
+      if (heatmapData.length === 0) return;
+      const maxValue = Math.max(...heatmapData.map(p => p.value));
+
+      // 清空画布，防止背景颜色
+      const ctx = heatmapInstance._renderer.canvas.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+
+      heatmapInstance.setData({
+        max: maxValue,
+        data: heatmapData
+      });
+
+      const heatmapCanvas = heatmapInstance._renderer.canvas;
+      const heatmapDataUrl = heatmapCanvas.toDataURL('image/png');
+
+      if (heatmapEntity) {
+        viewer.entities.remove(heatmapEntity);
+      }
+      heatmapEntity = viewer.entities.add({
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
+          material: new Cesium.ImageMaterialProperty({
+            image: heatmapDataUrl,
+            transparent: true
+          })
+        }
+      });
+    }
+
+    updateHeatmap();
+
+    let timeoutId;
+    viewer.scene.postRender.addEventListener(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(updateHeatmap, 200);
+    });
+
+    window.addEventListener('resize', () => {
+      resizeHeatmapCanvas();
+      updateHeatmap();
+    });
+  </script>
+</body>
+
+</html>
