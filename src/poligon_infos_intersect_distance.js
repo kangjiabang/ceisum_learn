@@ -13,8 +13,10 @@ async function initSpatialIndex() {
 
     const { default: RBush } = await import('rbush');
 
-    // 解析建筑物数据
-    polygons = await parseBuildingsFile('./src/buildings_output.txt');
+    // 解析建筑物数据，浏览器环境下用 fetch 路径
+    // 假设 parseBuildingsFile 支持 fetch 或你可以直接 fetch 文件内容
+    const buildingsFilePath = '/src/buildings_output.txt';
+    polygons = await parseBuildingsFile(buildingsFilePath);
     console.log(`加载了 ${polygons.length} 个建筑物`);
 
     // 构建空间索引
@@ -74,13 +76,21 @@ export async function getBuildingsWithinDistance(point, distanceInMeters) {
     const distanceInKm = distanceInMeters / 1000;
     const [x, y] = point.geometry.coordinates;
 
-    // 扩大搜索范围
-    const searchRadius = Math.max(distanceInKm * 3, 0.01); // 至少 10 米
+    // 将距离（千米）转换为经纬度差值
+    // 1度纬度大约等于111千米，经度需要根据纬度进行调整
+    const latDegreePerKm = 1 / 111;
+    const lngDegreePerKm = 1 / (111 * Math.cos(y * Math.PI / 180));
+    
+    // 扩大搜索范围（转换为度）
+    const searchRadiusLat = distanceInKm * 3 * latDegreePerKm;
+    const searchRadiusLng = distanceInKm * 3 * lngDegreePerKm;
+    const minSearchRadius = 0.0001; // 最小搜索半径约为11米
+    
     const searchBounds = {
-        minX: x - searchRadius,
-        minY: y - searchRadius,
-        maxX: x + searchRadius,
-        maxY: y + searchRadius
+        minX: x - Math.max(searchRadiusLng, minSearchRadius),
+        minY: y - Math.max(searchRadiusLat, minSearchRadius),
+        maxX: x + Math.max(searchRadiusLng, minSearchRadius),
+        maxY: y + Math.max(searchRadiusLat, minSearchRadius)
     };
 
     // 使用 RTree 快速筛选候选
