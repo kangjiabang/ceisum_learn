@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Voxel City</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <script type="module">
+        import * as THREE from "https://esm.sh/three@0.150.1";
+        import { OrbitControls } from "https://esm.sh/three@0.150.1/examples/jsm/controls/OrbitControls.js";
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+
+        // 相机
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(50, 50, 50);
+        camera.lookAt(0, 0, 0);
+
+        // 渲染器
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 控制器
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        // 光源
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(50, 100, 50);
+        scene.add(dirLight);
+
+        // 地面
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshStandardMaterial({ color: 0x333333 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // 模拟建筑高度数据 (可以换成真实 GIS 或 DEM 数据)
+        const cityWidth = 40;
+        const cityDepth = 40;
+        const spacing = 1.5;
+
+const segments = 5; // 每个柱子拆成几段
+for (let i = 0; i < cityWidth; i++) {
+    for (let j = 0; j < cityDepth; j++) {
+        const totalHeight = Math.random() * 10;
+        let yOffset = 0; // 叠加高度起点
+
+        for (let s = 0; s < segments; s++) {
+            // 每段高度，最后一段可能不够平分
+            const segHeight = s === segments - 1 ? totalHeight - yOffset : totalHeight / segments;
+
+            // 创建每段 Box
+            const geometry = new THREE.BoxGeometry(1, segHeight, 1);
+            geometry.translate(0, segHeight / 2, 0); // 底部对齐
+
+            // 颜色渐变（也可以随机）
+            const t = yOffset / totalHeight; // 总高度比例
+            const color = new THREE.Color(0x66ff66).lerp(new THREE.Color(0xff9999), t); // 底部绿 -> 顶部红
+
+            const material = new THREE.MeshStandardMaterial({ color });
+
+            const box = new THREE.Mesh(geometry, material);
+            box.position.set(i * spacing, yOffset + segHeight / 2, j * spacing);
+            scene.add(box);
+
+            yOffset += segHeight; // 更新叠加高度
+        }
+    }
+}
+
+
+
+
+
+        // 渲染循环
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>ECharts 剖面图示例</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+</head>
+
+<body>
+    <div id="main" style="width: 600px; height: 400px;"></div>
+    <script type="text/javascript">
+        // 初始化 ECharts 实例
+        var myChart = echarts.init(document.getElementById('main'));
+
+        // 模拟数据：深度（负值表示向下） vs 温度
+        var depth = [80, 70, 20, 30, 40, 50, 60, 70, 80, 90, 100]; // 单位：米
+        var point = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; // 单位：点序号
+
+        // 配置项
+        var option = {
+            title: {
+                text: '航线高度剖面',
+                left: 'center'
+            },
+            tooltip: {
+                trigger: 'axis'
+            },
+            xAxis: {
+                type: 'value',
+                name: '航线点序号',
+                nameLocation: 'middle',
+                nameGap: 30,
+                axisLabel: {
+                    formatter: '{value}'
+                },
+                min: 0,
+                max: point.length + 1
+            },
+            yAxis: {
+                type: 'value',
+                name: '高度 (m)',
+                nameLocation: 'middle',
+                nameGap: 40,
+                axisLabel: {
+                    formatter: function (value) {
+                        return Math.abs(value) + ' m';
+                    }
+                },
+                min: 0,
+                max: 100
+            },
+            series: [{
+                name: '航线高度剖面',
+                type: 'line',
+                data: point.map((temp, idx) => [temp, depth[idx]]), // [x, y] = [温度, 深度]
+                smooth: true,
+                symbol: 'circle',
+                lineStyle: {
+                    width: 3,
+                    color: '#FF6347'
+                },
+                itemStyle: {
+                    color: '#DC143C'
+                },
+                areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
+                        offset: 0, color: 'rgba(255, 99, 71, 0.5)'
+                    }, {
+                        offset: 1, color: 'rgba(255, 99, 71, 0.1)'
+                    }])
+                }
+            }],
+            grid: {
+                right: 60,
+                left: 60,
+                bottom: 60,
+                top: 60
+            }
+        };
+
+        // 使用配置项
+        myChart.setOption(option);
+
+        // 自适应
+        window.addEventListener('resize', function () {
+            myChart.resize();
+        });
+    </script>
+</body>
+
+</html>

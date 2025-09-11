@@ -1,0 +1,102 @@
+<input type="file" id="fileInput" />
+
+<script type="module">
+    import * as THREE from "https://esm.sh/three@0.150.1";
+    import { OrbitControls } from "https://esm.sh/three@0.150.1/examples/jsm/controls/OrbitControls.js";
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x222222);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 5000, 5000); // 拉远相机，方便查看建筑
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0, 0);
+    controls.update();
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(1000, 2000, 1000);
+    scene.add(dirLight);
+
+    const ambientLight = new THREE.AmbientLight(0x888888);
+    scene.add(ambientLight);
+
+    // 地面
+    const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(20000, 20000),
+        new THREE.MeshStandardMaterial({ color: 0x333333 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    const segments = 5; // 每栋建筑拆成几段积木
+
+    document.getElementById('fileInput').addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        const text = await file.text();
+        const lines = text.split('\n').filter(l => l.trim() !== '');
+
+        for (const line of lines) {
+            const parts = line.split(/","/);
+            if (parts.length < 2) continue;
+
+            const wkt = parts[0].replace(/^"+|"+$/g, '');
+            const heightValue = parseFloat(parts[1].replace(/^"+|"+$/g, ''));
+            if (isNaN(heightValue)) continue;
+
+            // 解析 MULTIPOLYGON，只取第一个 POLYGON
+            const coordsMatch = wkt.match(/\(\(\((.*)\)\)\)/);
+            if (!coordsMatch) continue;
+            const coordsText = coordsMatch[1];
+
+            const coords = coordsText.split(',').map(c => {
+                const [lng, lat] = c.trim().split(' ').map(parseFloat);
+                return [lng, lat];
+            });
+
+            // 累计高度
+            let yOffset = 0;
+
+            for (let s = 0; s < segments; s++) {
+                const segHeight = s === segments - 1 ? heightValue - yOffset : heightValue / segments;
+
+                const shape = new THREE.Shape();
+                coords.forEach(([x, z], index) => {
+                    if (index === 0) shape.moveTo(x * 100000, z * 100000); // 放大经纬度
+                    else shape.lineTo(x * 100000, z * 100000);
+                });
+
+                const extrudeSettings = { depth: segHeight, bevelEnabled: false };
+                const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+
+                // 三段渐变颜色
+                const t = yOffset / heightValue;
+                let color;
+                if (t < 0.5) {
+                    color = new THREE.Color(0x66ff66).lerp(new THREE.Color(0xffff99), t / 0.5);
+                } else {
+                    color = new THREE.Color(0xffff99).lerp(new THREE.Color(0xff9999), (t - 0.5) / 0.5);
+                }
+
+                const material = new THREE.MeshStandardMaterial({ color });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.y = yOffset; // 累加高度
+                scene.add(mesh);
+
+                yOffset += segHeight;
+            }
+        }
+    });
+
+
+    function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+    }
+    animate();
+</script>

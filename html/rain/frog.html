@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Cesium Global Fog Effect - Simple Version</title>
+    <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+    <style>
+        html,
+        body,
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="cesiumContainer"></div>
+    <script type="module">
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        (async () => {
+            try {
+                const viewer = new Cesium.Viewer("cesiumContainer", {
+                    terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+                        requestVertexNormals: true,
+                        requestWaterMask: true
+                    })
+                });
+
+                // === 简化方案：主要使用内置雾效 + Tileset雾效 ===
+
+                // 不再使用地形材质雾效，改为使用更强的内置雾效
+                viewer.scene.fog.enabled = true;
+                viewer.scene.fog.density = 0.0003; // 增加密度
+                viewer.scene.fog.screenSpaceErrorFactor = 3.0;
+                viewer.scene.fog.minimumBrightness = 0.1;
+
+                // === 方法2: 为地形添加雾效材质 ===
+                const createFogMaterial = (fogColor, fogDensity) => {
+                    return new Cesium.Material({
+                        fabric: {
+                            type: 'FogGlobe',
+                            uniforms: {
+                                fogColor: fogColor,
+                                fogDensity: fogDensity
+                            },
+                            source: `
+                                czm_material czm_getMaterial(czm_materialInput materialInput) {
+                                    czm_material material = czm_getDefaultMaterial(materialInput);
+                                    
+                                    // 使用默认地形颜色（让Cesium处理地形纹理）
+                                    // material.diffuse 已经包含了地形的真实颜色
+                                    
+                                    // 计算到摄像机的距离
+                                    float distance = length(materialInput.positionToEyeEC);
+                                    
+                                    // 计算雾效因子
+                                    float fogFactor = 1.0 - exp(-distance * fogDensity);
+                                    fogFactor = clamp(fogFactor, 0.0, 0.6); // 限制最大雾效强度
+                                    
+                                    // 保持原始地形颜色，只在远处添加雾效
+                                    material.diffuse = mix(material.diffuse, fogColor, fogFactor);
+                                    material.alpha = 1.0;
+                                    
+                                    return material;
+                                }
+                            `
+                        }
+                    });
+                };
+
+                let terrainFogMaterial = createFogMaterial(
+                    new Cesium.Cartesian3(0.8, 0.9, 1.0),
+                    0.00001
+                );
+
+                // === 方法3: 为 3D Tileset 添加雾效 ===
+                const tilesetFogShader = new Cesium.CustomShader({
+                    fragmentShaderText: `
+                        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+                            // 计算距离雾效
+                            float viewDistance = length(fsInput.attributes.positionEC);
+                            float fogFactor = 1.0 - exp(-viewDistance * fogDensity);
+                            fogFactor = clamp(fogFactor, 0.0, 0.8);
+                            
+                            // 应用雾效到材质颜色
+                            vec3 finalColor = mix(material.diffuse, fogColor, fogFactor);
+                            material.diffuse = finalColor;
+                        }
+                    `,
+                    uniforms: {
+                        fogDensity: {
+                            type: Cesium.UniformType.FLOAT,
+                            value: 0.00001
+                        },
+                        fogColor: {
+                            type: Cesium.UniformType.VEC3,
+                            value: new Cesium.Cartesian3(0.8, 0.9, 1.0)
+                        }
+                    }
+                });
+
+                // 加载 3D Tiles 并应用雾效
+                try {
+                    const tileset = await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json");
+                    tileset.customShader = tilesetFogShader;
+                    viewer.scene.primitives.add(tileset);
+                    viewer.zoomTo(tileset);
+                } catch (error) {
+                    console.warn("无法加载 3D Tileset:", error);
+                }
+
+                // 移除地形雾效材质的应用
+                // viewer.scene.globe.material = terrainFogMaterial;
+
+                // === 方法4: 大气效果增强 ===
+                viewer.scene.skyAtmosphere.show = true;
+                viewer.scene.skyAtmosphere.brightnessShift = 0.1;
+                viewer.scene.skyAtmosphere.saturationShift = -0.2;
+
+                // 设置全局光照
+                viewer.scene.light = new Cesium.DirectionalLight({
+                    direction: new Cesium.Cartesian3(-1, -1, -1),
+                    color: new Cesium.Color(1.0, 0.95, 0.8, 1.0),
+                    intensity: 2.0
+                });
+
+                // === 控制面板 ===
+                const toolbar = document.createElement('div');
+                toolbar.style.cssText = `
+                    position: absolute;
+                    top: 10px;
+                    left: 10px;
+                    background: rgba(42, 42, 42, 0.9);
+                    padding: 15px;
+                    border-radius: 8px;
+                    color: white;
+                    font-family: Arial, sans-serif;
+                    font-size: 12px;
+                    min-width: 280px;
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                `;
+
+                toolbar.innerHTML = `
+                    <h4 style="margin-top: 0; color: #fff;">🌫️ 全局雾效控制</h4>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <h5 style="margin: 10px 0 5px 0; color: #ccc;">内置雾效</h5>
+                        <label><input type="checkbox" id="enableBuiltinFog" checked> 启用内置雾效</label><br>
+                        <label>内置雾密度: <input type="range" id="builtinFogDensity" min="0" max="0.002" step="0.0001" value="0.0003"></label><br>
+                        <label>最小亮度: <input type="range" id="fogMinBrightness" min="0" max="1" step="0.1" value="0.1"></label><br>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <h5 style="margin: 10px 0 5px 0; color: #ccc;">自定义雾效</h5>
+                        <label>雾密度: <input type="range" id="customFogDensity" min="0" max="0.0001" step="0.000001" value="0.00001"></label><br>
+                        <label>雾颜色 R: <input type="range" id="fogColorR" min="0" max="1" step="0.1" value="0.8"></label><br>
+                        <label>雾颜色 G: <input type="range" id="fogColorG" min="0" max="1" step="0.1" value="0.9"></label><br>
+                        <label>雾颜色 B: <input type="range" id="fogColorB" min="0" max="1" step="0.1" value="1.0"></label><br>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <h5 style="margin: 10px 0 5px 0; color: #ccc;">开关控制</h5>
+                        <label><input type="checkbox" id="enableAtmosphere" checked> 启用大气效果</label><br>
+                        <label><input type="checkbox" id="enableAdvancedFog" checked> 启用高级雾效</label><br>
+                    </div>
+                    
+                    <div>
+                        <button id="resetFog" style="background: #48a; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">重置雾效</button>
+                        <button id="presetLight" style="background: #a84; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">轻雾</button>
+                        <button id="presetHeavy" style="background: #666; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">浓雾</button>
+                    </div>
+                `;
+
+                document.body.appendChild(toolbar);
+
+                // === 事件监听器 ===
+                function updateCustomFogParameters() {
+                    const density = parseFloat(document.getElementById('customFogDensity').value);
+                    const colorR = parseFloat(document.getElementById('fogColorR').value);
+                    const colorG = parseFloat(document.getElementById('fogColorG').value);
+                    const colorB = parseFloat(document.getElementById('fogColorB').value);
+                    const fogColor = new Cesium.Cartesian3(colorR, colorG, colorB);
+
+                    // 更新 tileset 雾效
+                    if (tilesetFogShader && document.getElementById('enableAdvancedFog').checked) {
+                        tilesetFogShader.setUniform('fogDensity', density);
+                        tilesetFogShader.setUniform('fogColor', fogColor);
+                    }
+                }
+
+                // 自定义雾效参数控制
+                document.getElementById('customFogDensity').addEventListener('input', updateCustomFogParameters);
+                document.getElementById('fogColorR').addEventListener('input', updateCustomFogParameters);
+                document.getElementById('fogColorG').addEventListener('input', updateCustomFogParameters);
+                document.getElementById('fogColorB').addEventListener('input', updateCustomFogParameters);
+
+                // 内置雾效控制
+                document.getElementById('enableBuiltinFog').addEventListener('change', (e) => {
+                    viewer.scene.fog.enabled = e.target.checked;
+                });
+
+                document.getElementById('builtinFogDensity').addEventListener('input', (e) => {
+                    viewer.scene.fog.density = parseFloat(e.target.value);
+                });
+
+                document.getElementById('fogMinBrightness').addEventListener('input', (e) => {
+                    viewer.scene.fog.minimumBrightness = parseFloat(e.target.value);
+                });
+
+                // 高级雾效开关（控制Tileset雾效）
+                document.getElementById('enableAdvancedFog').addEventListener('change', (e) => {
+                    if (e.target.checked && tilesetFogShader) {
+                        // 重新应用自定义雾效
+                        updateCustomFogParameters();
+                    } else if (tilesetFogShader) {
+                        // 禁用自定义雾效
+                        tilesetFogShader.setUniform('fogDensity', 0.0);
+                    }
+                });
+
+                // 大气效果开关
+                document.getElementById('enableAtmosphere').addEventListener('change', (e) => {
+                    viewer.scene.skyAtmosphere.show = e.target.checked;
+                });
+
+                // 重置按钮
+                document.getElementById('resetFog').addEventListener('click', () => {
+                    document.getElementById('customFogDensity').value = 0.00001;
+                    document.getElementById('fogColorR').value = 0.8;
+                    document.getElementById('fogColorG').value = 0.9;
+                    document.getElementById('fogColorB').value = 1.0;
+                    document.getElementById('builtinFogDensity').value = 0.0003;
+                    document.getElementById('fogMinBrightness').value = 0.1;
+                    document.getElementById('enableBuiltinFog').checked = true;
+                    document.getElementById('enableAdvancedFog').checked = true;
+                    document.getElementById('enableAtmosphere').checked = true;
+
+                    viewer.scene.fog.enabled = true;
+                    viewer.scene.fog.density = 0.0003;
+                    viewer.scene.fog.minimumBrightness = 0.1;
+                    viewer.scene.skyAtmosphere.show = true;
+                    updateCustomFogParameters();
+                });
+
+                // 预设按钮
+                document.getElementById('presetLight').addEventListener('click', () => {
+                    document.getElementById('customFogDensity').value = 0.000005;
+                    document.getElementById('builtinFogDensity').value = 0.0001;
+                    document.getElementById('fogColorR').value = 0.9;
+                    document.getElementById('fogColorG').value = 0.95;
+                    document.getElementById('fogColorB').value = 1.0;
+                    viewer.scene.fog.density = 0.0001;
+                    updateCustomFogParameters();
+                });
+
+                document.getElementById('presetHeavy').addEventListener('click', () => {
+                    document.getElementById('customFogDensity').value = 0.00005;
+                    document.getElementById('builtinFogDensity').value = 0.0005;
+                    document.getElementById('fogColorR').value = 0.7;
+                    document.getElementById('fogColorG').value = 0.8;
+                    document.getElementById('fogColorB').value = 0.9;
+                    viewer.scene.fog.density = 0.0005;
+                    updateCustomFogParameters();
+                });
+
+                console.log("全局雾效初始化完成 ✓");
+                console.log("- 内置雾效: 启用（主要雾效）");
+                console.log("- 3D Tileset 雾效: 启用（建筑雾效）");
+                console.log("- 大气效果: 增强");
+                console.log("- 地形保持原始颜色");
+
+            } catch (error) {
+                console.error("初始化失败:", error);
+            }
+        })();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>真实闪电效果</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+
+        let scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        let camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 20, 40);
+
+        let renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 环境光和全局光
+        let ambient = new THREE.AmbientLight(0x111111);
+        scene.add(ambient);
+
+        let flashLight = new THREE.PointLight(0xffffff, 0, 100);
+        flashLight.position.set(0, 20, 20);
+        scene.add(flashLight);
+
+        // 闪电材质
+        let lightningMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+
+        // 存储闪电
+        let lightnings = [];
+
+        // 创建闪电函数
+        function createLightning(start, end, maxBranch = 2) {
+            let points = [];
+            points.push(start);
+
+            let segments = 15;
+            for (let i = 1; i < segments; i++) {
+                let t = i / segments;
+                let x = start.x + (end.x - start.x) * t + (Math.random() - 0.5) * 2;
+                let y = start.y + (end.y - start.y) * t + (Math.random() - 0.5) * 2;
+                let z = start.z + (end.z - start.z) * t + (Math.random() - 0.5) * 2;
+                points.push(new THREE.Vector3(x, y, z));
+            }
+            points.push(end);
+
+            let geometry = new THREE.BufferGeometry().setFromPoints(points);
+            let line = new THREE.Line(geometry, lightningMaterial);
+            scene.add(line);
+            lightnings.push({ line, lifetime: 0.2 });
+
+            // 分支
+            if (maxBranch > 0 && Math.random() < 0.6) {
+                let branchStart = points[Math.floor(Math.random() * points.length)];
+                let branchEnd = new THREE.Vector3(
+                    branchStart.x + (Math.random() - 0.5) * 5,
+                    branchStart.y - Math.random() * 10,
+                    branchStart.z + (Math.random() - 0.5) * 5
+                );
+                createLightning(branchStart, branchEnd, maxBranch - 1);
+            }
+        }
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 随机触发闪电
+            if (Math.random() < 0.02) {
+                createLightning(new THREE.Vector3(0, 20, 0), new THREE.Vector3(0, 0, 0));
+                flashLight.intensity = 5 + Math.random() * 5; // 瞬间闪光
+            }
+
+            // 更新闪电寿命
+            for (let i = lightnings.length - 1; i >= 0; i--) {
+                lightnings[i].lifetime -= 0.016;
+                if (lightnings[i].lifetime <= 0) {
+                    scene.remove(lightnings[i].line);
+                    lightnings.splice(i, 1);
+                }
+            }
+
+            // 环境闪光衰减
+            flashLight.intensity *= 0.9;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>

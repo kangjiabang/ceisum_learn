@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cesium 下雨效果</title>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+
+  <script type="module">
+    // 设置你的 Access Token
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    // 先创建地形提供者
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    // 创建 Viewer
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      terrainProvider: terrainProvider
+    });
+
+    // 加载 3D Tileset
+    const tileset = await Cesium.Cesium3DTileset.fromUrl("http://192.168.4.78:8000/tileset.json");
+    viewer.scene.primitives.add(tileset);
+    await viewer.zoomTo(tileset);
+
+    // ======================
+    // ✅ 创建下雨粒子系统
+    // ======================
+
+    const rainParticleSystem = new Cesium.ParticleSystem({
+      // 使用 Base64 内联白点
+      image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQYV2NgAAIAAAUAAarVyFEAAAAASUVORK5CYII=',
+
+      // 用亮色测试（青色），确保你能看到
+      startColor: Cesium.Color.RED.withAlpha(1.0),
+      endColor: Cesium.Color.RED.withAlpha(1.0),
+
+      // 生命与速度
+      particleLife: 2.0,
+      speed: 60.0,
+
+      // 雨滴形状：细长
+      imageSize: new Cesium.Cartesian2(20, 20),
+
+
+      // 发射密度
+      emissionRate: 4000,  // 每秒发射 4000 个粒子
+
+      // 系统生命周期（可忽略）
+      lifetime: 3600,
+
+      // 发射器：以相机为中心，半径 300 米的球
+      emitter: new Cesium.SphereEmitter(300.0),
+
+      // ❗关键：先不设 modelMatrix，后面每帧更新
+
+      // 更新回调：添加重力（向下加速）
+      updateCallback: (particle, dt) => {
+        // Z 轴负方向为“向下”（在 ENU 局部坐标中）
+        Cesium.Cartesian3.add(
+          particle.velocity,
+          new Cesium.Cartesian3(0, 0, -35), // 重力加速度
+          particle.velocity
+        );
+      },
+
+      // 启用深度测试（防止穿模）
+      depthTest: true
+    });
+
+    // 添加到场景
+    window.rainSystem = viewer.scene.primitives.add(rainParticleSystem);
+
+    // ======================
+    // ✅ 每帧更新：让雨跟随相机，并正确对齐方向
+    // ======================
+    viewer.scene.postUpdate.addEventListener(() => {
+      const position = viewer.scene.camera.position;
+
+      // ✅ 正确创建 ENU 局部坐标系矩阵
+      const enuToFixed = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+
+      // 应用到粒子系统
+      window.rainSystem.modelMatrix = enuToFixed;
+    });
+
+    console.log("🌧️ 下雨效果已启动！请抬头看天空，或飞到高空观察。");
+    console.log("如果看不到，请尝试：");
+    console.log("1. 按住 Ctrl + 鼠标左键 向上仰头");
+    console.log("2. 飞到建筑上方（Z 轴更高）");
+    console.log("3. 把 startColor 改成 Color.RED 测试");
+  </script>
+</body>
+
+</html>

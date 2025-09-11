@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #backButton {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+      padding: 10px 20px;
+      background: rgba(48, 51, 56, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      display: none;
+    }
+
+    #backButton:hover {
+      background: rgba(48, 51, 56, 1);
+    }
+
+    #info {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      background: rgba(48, 51, 56, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      max-width: 300px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <button id="backButton" onclick="returnToMainScene()">返回主场景</button>
+
+  <div id="info">
+    <strong>操作说明：</strong><br>
+    • 点击任意起降场进入子场景<br>
+    • 起降场由多个矩形起降单元组成<br>
+    • 子场景中可查看起降单元详情
+  </div>
+
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true
+    });
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      terrainProvider: terrainProvider,
+      infoBox: false,
+      selectionIndicator: false
+    });
+
+    // 全局变量
+    let currentScene = 'main'; // 'main' 或 'landing'
+    let mainCameraPosition = null;
+    let landingFields = [];
+    let currentLandingField = null;
+
+    // 起降场数据 - 更新为新坐标 (119.998060, 30.282778)
+    // 起降场数据 - 已整体平移到新中心 (119.995161825460514, 30.275375425493404)
+    const landingFieldsData = [
+      {
+        id: 'field1',
+        name: '起降场 A',
+        center: Cesium.Cartesian3.fromDegrees(119.995161825460514, 30.275375425493404, 5),
+        units: [
+          { position: Cesium.Cartesian3.fromDegrees(119.99476182546051, 30.275675425493404, 2), width: 50, height: 30 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99526182546051, 30.275675425493404, 2), width: 50, height: 30 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.275675425493404, 2), width: 50, height: 30 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99476182546051, 30.275075425493404, 2), width: 50, height: 30 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99526182546051, 30.275075425493404, 2), width: 50, height: 30 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.275075425493404, 2), width: 50, height: 30 }
+        ]
+        // },
+        // {
+        //   id: 'field2',
+        //   name: '起降场 B',
+        //   center: Cesium.Cartesian3.fromDegrees(119.99616182546051, 30.276375425493404, 120),
+        //   units: [
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.276675425493404, 120), width: 60, height: 40 },
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99656182546051, 30.276675425493404, 120), width: 60, height: 40 },
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.276075425493404, 120), width: 60, height: 40 },
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99656182546051, 30.276075425493404, 120), width: 60, height: 40 }
+        //   ]
+        // },
+        // {
+        //   id: 'field3',
+        //   name: '起降场 C',
+        //   center: Cesium.Cartesian3.fromDegrees(119.99416182546051, 30.274375425493404, 80),
+        //   units: [
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99376182546051, 30.274675425493404, 80), width: 45, height: 25 },
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99456182546051, 30.274675425493404, 80), width: 45, height: 25 },
+        //     { position: Cesium.Cartesian3.fromDegrees(119.99416182546051, 30.274075425493404, 80), width: 45, height: 25 }
+        //   ]
+      }
+    ];
+    // 创建起降场
+    // 创建起降场
+    function createLandingFields() {
+      landingFieldsData.forEach(fieldData => {
+        const landingField = {
+          id: fieldData.id,
+          name: fieldData.name,
+          center: fieldData.center,
+          units: [],
+          boundaryEntity: null,
+          baseEntity: null // 用于存储底座实体
+        };
+
+        // === 计算所有单元的外包矩形范围（WGS84 经纬度）===
+        let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+
+        fieldData.units.forEach(unitData => {
+          const carto = Cesium.Cartographic.fromCartesian(unitData.position);
+          const lat = Cesium.Math.toDegrees(carto.latitude);
+          const lon = Cesium.Math.toDegrees(carto.longitude);
+
+          const halfWidthDeg = (unitData.width / 111320) / 2; // 米转纬度/经度近似
+          const halfHeightDeg = (unitData.height / 111320) / 2;
+
+          const unitWest = lon - halfWidthDeg;
+          const unitEast = lon + halfWidthDeg;
+          const unitSouth = lat - halfHeightDeg;
+          const unitNorth = lat + halfHeightDeg;
+
+          west = Math.min(west, unitWest);
+          east = Math.max(east, unitEast);
+          south = Math.min(south, unitSouth);
+          north = Math.max(north, unitNorth);
+        });
+
+        // 扩大一点作为底座（比如外扩 10 米）
+        const buffer = 10 / 111320; // 10米 ≈ 0.00009度
+        // === 创建底座实体（使用 Polygon 替代 Rectangle，确保高度生效）===
+        const baseRectangle = Cesium.Rectangle.fromDegrees(
+          west - buffer,
+          south - buffer,
+          east + buffer,
+          north + buffer
+        );
+
+        // 将矩形转为世界坐标点数组（边界）
+        const basePolygonHierarchy = Cesium.PolygonGeometry.fromPositions({
+          positions: Cesium.Rectangle.subsample(baseRectangle, viewer.scene.globe.ellipsoid, 10), // 采样边界点
+          height: 20, // 初始高度（可选）
+          vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT
+        });
+
+        // 提取角点构造 hierarchy（更高效）
+        const corners = [
+          Cesium.Cartesian3.fromRadians(baseRectangle.west, baseRectangle.south),
+          Cesium.Cartesian3.fromRadians(baseRectangle.west, baseRectangle.north),
+          Cesium.Cartesian3.fromRadians(baseRectangle.east, baseRectangle.north),
+          Cesium.Cartesian3.fromRadians(baseRectangle.east, baseRectangle.south),
+          Cesium.Cartesian3.fromRadians(baseRectangle.west, baseRectangle.south) // 闭合
+        ];
+
+        const baseEntity = viewer.entities.add({
+          id: `${fieldData.id}_base`,
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(corners),
+            material: new Cesium.ImageMaterialProperty({
+              image: 'image.png',
+              repeat: new Cesium.Cartesian2(3, 3),
+              color: Cesium.Color.WHITE.withAlpha(0.9),
+              transparent: true
+            }),
+            outline: true,
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.6),
+            outlineWidth: 2,
+            // ✅ 关键：使用相对地面高度
+            heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+            extrudedHeight: 0.1, // 抬升一点点防止穿模（如 0.1 米）
+            extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
+          },
+          position: fieldData.center, // 可选，用于定义局部坐标系原点
+          properties: {
+            type: 'landingBase',
+            fieldId: fieldData.id
+          }
+        });
+
+        landingField.baseEntity = baseEntity;
+
+        // === 创建起降单元（原有逻辑）===
+        fieldData.units.forEach((unitData, index) => {
+          const cartographic = Cesium.Cartographic.fromCartesian(unitData.position);
+          const longitude = cartographic.longitude;
+          const latitude = cartographic.latitude;
+          const height = cartographic.height;
+
+          const halfWidthRad = Cesium.Math.toRadians(unitData.width / 111320 / 2);
+          const halfHeightRad = Cesium.Math.toRadians(unitData.height / 111320 / 2);
+
+          const west = longitude - halfWidthRad;
+          const east = longitude + halfWidthRad;
+          const south = latitude - halfHeightRad;
+          const north = latitude + halfHeightRad;
+
+          const unit = viewer.entities.add({
+            id: `${fieldData.id}_unit_${index}`,
+            position: unitData.position,
+            rectangle: {
+              coordinates: new Cesium.Rectangle(west, south, east, north),
+              height: height,
+              material: Cesium.Color.CYAN.withAlpha(0.7),
+              outline: true,
+              outlineColor: Cesium.Color.BLUE,
+              extrudedHeight: height + 5,
+              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
+            },
+            properties: {
+              type: 'landingUnit',
+              fieldId: fieldData.id,
+              fieldName: fieldData.name,
+              unitIndex: index,
+              width: unitData.width,
+              height: unitData.height
+            }
+          });
+
+          landingField.units.push(unit);
+        });
+
+        // === 创建起降场边界标识（原有逻辑）===
+        const boundary = viewer.entities.add({
+          id: `${fieldData.id}_boundary`,
+          position: fieldData.center,
+          label: {
+            text: fieldData.name,
+            font: '16pt sans-serif',
+            fillColor: Cesium.Color.YELLOW,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -50),
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          },
+          point: {
+            pixelSize: 15,
+            color: Cesium.Color.YELLOW,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          },
+          properties: {
+            type: 'landingField',
+            fieldId: fieldData.id,
+            fieldName: fieldData.name
+          }
+        });
+
+        landingField.boundaryEntity = boundary;
+        landingFields.push(landingField);
+      });
+    }
+    // 进入起降场子场景
+    function enterLandingFieldScene(fieldId) {
+      currentScene = 'landing';
+      const field = landingFields.find(f => f.id === fieldId);
+      if (!field) return;
+
+      currentLandingField = field;
+
+      // 保存主场景摄像头位置
+      mainCameraPosition = {
+        destination: viewer.camera.position.clone(),
+        orientation: {
+          heading: viewer.camera.heading,
+          pitch: viewer.camera.pitch,
+          roll: viewer.camera.roll
+        }
+      };
+
+      // 隐藏其他起降场
+      landingFields.forEach(otherField => {
+        if (otherField.id !== fieldId) {
+          otherField.boundaryEntity.show = false;
+          otherField.units.forEach(unit => unit.show = false);
+        }
+      });
+
+      // 飞行到当前起降场
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(field.center).longitude),
+          Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(field.center).latitude),
+          500
+        ),
+        orientation: {
+          heading: 0,
+          pitch: Cesium.Math.toRadians(-45),
+          roll: 0
+        },
+        duration: 2.0
+      });
+
+      // 显示返回按钮
+      document.getElementById('backButton').style.display = 'block';
+
+      // 更新信息面板
+      document.getElementById('info').innerHTML = `
+        <strong>${field.name} 详情：</strong><br>
+        • 起降单元数量: ${field.units.length}<br>
+        • 场地位置: ${Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(field.center).longitude).toFixed(4)}°, 
+        ${Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(field.center).latitude).toFixed(4)}°<br>
+        • 点击起降单元查看详情
+      `;
+    }
+
+    // 返回主场景
+    window.returnToMainScene = function () {
+      currentScene = 'main';
+      currentLandingField = null;
+
+      // 显示所有起降场
+      landingFields.forEach(field => {
+        field.boundaryEntity.show = true;
+        field.units.forEach(unit => unit.show = true);
+      });
+
+      // 恢复摄像头位置
+      if (mainCameraPosition) {
+        viewer.camera.flyTo({
+          destination: mainCameraPosition.destination,
+          orientation: mainCameraPosition.orientation,
+          duration: 2.0
+        });
+      }
+
+      // 隐藏返回按钮
+      document.getElementById('backButton').style.display = 'none';
+
+      // 恢复信息面板
+      document.getElementById('info').innerHTML = `
+        <strong>操作说明：</strong><br>
+        • 点击任意起降场进入子场景<br>
+        • 起降场由多个矩形起降单元组成<br>
+        • 子场景中可查看起降单元详情
+      `;
+    };
+
+    // 点击事件处理
+    viewer.cesiumWidget.canvas.addEventListener('click', function (e) {
+      const pickedObject = viewer.scene.pick(viewer.camera.getPickRay(e));
+
+      if (Cesium.defined(pickedObject) && Cesium.defined(pickedObject.id)) {
+        const entity = pickedObject.id;
+        const properties = entity.properties;
+
+        if (properties && properties.type) {
+          if (properties.type._value === 'landingField' && currentScene === 'main') {
+            // 点击起降场，进入子场景
+            enterLandingFieldScene(properties.fieldId._value);
+          } else if (properties.type._value === 'landingUnit' && currentScene === 'landing') {
+            // 点击起降单元，显示详情
+            const unitInfo = `
+              <strong>起降单元详情：</strong><br>
+              • 所属场地: ${properties.fieldName._value}<br>
+              • 单元编号: ${properties.unitIndex._value + 1}<br>
+              • 尺寸: ${properties.width._value}m × ${properties.height._value}m<br>
+              • 状态: 可用
+            `;
+            document.getElementById('info').innerHTML = unitInfo;
+
+            // 高亮显示选中的单元
+            entity.rectangle.material = Cesium.Color.ORANGE.withAlpha(0.8);
+
+            // 2秒后恢复原色
+            setTimeout(() => {
+              entity.rectangle.material = Cesium.Color.CYAN.withAlpha(0.7);
+            }, 2000);
+          }
+        }
+      }
+    });
+
+    // 加载 3D Tileset (如果可用)
+    try {
+      const tileset = viewer.scene.primitives.add(
+        await Cesium.Cesium3DTileset.fromUrl(
+          "http://192.168.4.78:8000/tileset.json",
+          { debugShowBoundingVolume: false }
+        )
+      );
+
+      // 初始视图聚焦到tileset，然后创建起降场
+      await viewer.zoomTo(tileset);
+      createLandingFields();
+    } catch (error) {
+      console.log("无法加载3D Tileset，使用默认视图");
+      // 如果无法加载tileset，设置默认视图到新坐标
+      viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(119.998060, 30.282778, 2000),
+        orientation: {
+          heading: 0,
+          pitch: Cesium.Math.toRadians(-30),
+          roll: 0
+        }
+      });
+      createLandingFields();
+    }
+
+  </script>
+</body>
+
+</html>

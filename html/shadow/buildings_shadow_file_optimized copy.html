@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    /* Loading 样式 */
+    #loading {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1000;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    #loading.hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+
+  <!-- Loading 提示 -->
+  <div id="loading">
+    loading... <span id="progress">0</span>%
+  </div>
+
+  <script>
+    // 等待 Cesium 加载完成
+    function initializeApp() {
+      if (typeof Cesium === 'undefined') {
+        setTimeout(initializeApp, 100);
+        return;
+      }
+      initCesium();
+    }
+
+    async function initCesium() {
+      try {
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        const terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1, {
+          requestVertexNormals: true,
+          requestWaterMask: true
+        });
+
+        const viewer = new Cesium.Viewer("cesiumContainer", {
+          terrainProvider: terrainProvider,
+          scene3DOnly: true,
+          baseLayerPicker: false,
+          fullscreenButton: false,
+          vrButton: false,
+          geocoder: false,
+          homeButton: false,
+          infoBox: false,
+          sceneModePicker: false,
+          selectionIndicator: false,
+          timeline: false,
+          navigationHelpButton: false,
+          navigationInstructionsInitiallyVisible: false,
+          sceneMode: Cesium.SceneMode.SCENE3D
+        });
+
+        viewer.scene.globe.enableLighting = false;
+        viewer.scene.fxaa = true;
+        viewer.scene.highDynamicRange = false;
+
+        const tileset = viewer.scene.primitives.add(
+          await Cesium.Cesium3DTileset.fromUrl(
+            "http://192.168.4.78:8000/tileset.json",
+            { debugShowBoundingVolume: true }
+          )
+        );
+        viewer.zoomTo(tileset);
+
+        hideLoading();
+
+        loadBuildingsOptimized('./buildings_simple.csv', viewer);
+
+      } catch (error) {
+        console.error('初始化 Cesium 失败:', error);
+        showError('初始化失败');
+      }
+    }
+
+    function showError(message) {
+      const loadingDiv = document.getElementById('loading');
+      if (loadingDiv) {
+        loadingDiv.innerHTML = message;
+        setTimeout(() => {
+          loadingDiv.classList.add('hidden');
+        }, 3000);
+      }
+    }
+
+    function hideLoading() {
+      const loadingDiv = document.getElementById('loading');
+      if (loadingDiv) {
+        setTimeout(() => {
+          loadingDiv.classList.add('hidden');
+        }, 1000);
+      }
+    }
+
+    function updateProgress(percent) {
+      const progressSpan = document.getElementById('progress');
+      if (progressSpan) {
+        progressSpan.textContent = percent;
+      }
+    }
+
+    function parseWKTCoordinates(wkt) {
+      try {
+        const cleanWkt = wkt.replace(/^"|"$/g, '').trim();
+        const match = cleanWkt.match(/\(\(\(([^)]+)\)\)\)/);
+        if (!match) return null;
+
+        const coordsStr = match[1];
+        const coordPairs = coordsStr.split(',');
+        const coordinates = [];
+
+        for (let pair of coordPairs) {
+          const trimmedPair = pair.trim();
+          if (trimmedPair) {
+            const [lonStr, latStr] = trimmedPair.split(' ');
+            const lon = parseFloat(lonStr);
+            const lat = parseFloat(latStr);
+
+            if (!isNaN(lon) && !isNaN(lat) && isFinite(lon) && isFinite(lat)) {
+              coordinates.push(lon, lat);
+            } else {
+              return null;
+            }
+          }
+        }
+
+        if (coordinates.length === 0 || coordinates.length % 2 !== 0) {
+          return null;
+        }
+
+        return coordinates;
+      } catch (error) {
+        console.error('解析 WKT 坐标时出错:', error);
+        return null;
+      }
+    }
+
+    function createBuildingInstance(coordinates, height, bottomHeight, id) {
+      try {
+        const polygonHierarchy = new Cesium.PolygonHierarchy(
+          Cesium.Cartesian3.fromDegreesArray(coordinates)
+        );
+
+        const geometry = new Cesium.PolygonGeometry({
+          polygonHierarchy: polygonHierarchy,
+          height: bottomHeight,
+          extrudedHeight: height + 2,
+          vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
+          closeTop: true,
+          closeBottom: true
+        });
+
+        return new Cesium.GeometryInstance({
+          id: `building_${id}`,
+          geometry: geometry,
+          attributes: {
+            color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+              Cesium.Color.BLUE.withAlpha(0.6)
+            )
+          }
+        });
+      } catch (error) {
+        console.error('创建建筑物实例失败:', error);
+        return null;
+      }
+    }
+
+    // 计算建筑物中心点并飞行，保持水平视角
+    function flyToBuildingCenter(coordinates, viewer) {
+      if (!coordinates || coordinates.length === 0) return false;
+
+      let lonSum = 0, latSum = 0;
+      const count = coordinates.length / 2;
+      for (let i = 0; i < coordinates.length; i += 2) {
+        lonSum += coordinates[i];
+        latSum += coordinates[i + 1];
+      }
+      const centerLon = lonSum / count;
+      const centerLat = latSum / count;
+
+      const height = 100; // 相机高度，可以调节
+
+      const destination = Cesium.Cartesian3.fromDegrees(centerLon, centerLat, height);
+
+      viewer.camera.flyTo({
+        destination: destination,
+        duration: 2.0,
+        orientation: {
+          heading: 0.0,
+          pitch: -Cesium.Math.toRadians(30), // 视角向下倾斜30度
+          roll: 0.0
+        }
+      });
+
+      return true;
+    }
+
+    async function loadBuildingsOptimized(url, viewer) {
+      try {
+        const response = await fetch(url);
+        const text = await response.text();
+        const lines = text.trim().split('\n');
+
+        console.log(`开始加载 ${lines.length} 个建筑物...`);
+        updateProgress('0');
+
+        const batchSize = 100;
+        let processedCount = 0;
+        let buildingInstances = [];
+        let firstBuildingCoordinates = null;
+
+        for (let i = 0; i < lines.length; i += batchSize) {
+          const batch = lines.slice(i, Math.min(i + batchSize, lines.length));
+
+          for (const line of batch) {
+            if (!line.trim()) continue;
+
+            try {
+              const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+              if (parts.length < 2) continue;
+
+              const wkt = parts[0].replace(/^"|"$/g, '').trim();
+              const height = parseFloat(parts[1].replace(/^"|"$/g, '').trim());
+
+              if (isNaN(height) || !isFinite(height)) continue;
+
+              const coordinates = parseWKTCoordinates(wkt);
+              if (!coordinates) continue;
+
+              const bottomHeight = 0;
+
+              const instance = createBuildingInstance(coordinates, height, bottomHeight, processedCount);
+              if (instance) {
+                buildingInstances.push(instance);
+
+                if (!firstBuildingCoordinates) {
+                  firstBuildingCoordinates = coordinates;
+                }
+              }
+            } catch (error) {
+              console.warn('处理行数据失败:', error);
+            }
+
+            processedCount++;
+          }
+
+          const progress = Math.round((processedCount / lines.length) * 100);
+          updateProgress(progress.toString());
+
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        console.log(`成功创建 ${buildingInstances.length} 个建筑物实例`);
+
+        if (buildingInstances.length > 0) {
+          viewer.scene.primitives.add(new Cesium.Primitive({
+            geometryInstances: buildingInstances,
+            appearance: new Cesium.PerInstanceColorAppearance({
+              flat: true,
+              translucent: true,
+              renderState: {
+                depthTest: { enabled: true }
+              }
+            }),
+            releaseGeometryInstances: true,
+            allowPicking: false
+          }));
+
+          console.log('建筑物渲染完成');
+
+          setTimeout(() => {
+            flyToBuildingCenter(firstBuildingCoordinates, viewer);
+          }, 1000);
+        }
+
+        setTimeout(() => {
+          hideLoading();
+        }, 1000);
+
+      } catch (error) {
+        console.error('加载建筑物数据时出错:', error);
+        showError('加载失败');
+      }
+    }
+
+    initializeApp();
+
+  </script>
+</body>
+
+</html>

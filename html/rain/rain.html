@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Cesium + Three.js 下雨效果</title>
+    <script type="module">
+        import * as Cesium from 'https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js';
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js';
+
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        // === 初始化 Cesium ===
+        const viewer = new Cesium.Viewer('cesiumContainer', {
+            terrain: Cesium.Terrain.fromWorldTerrain(),
+            animation: false,
+            timeline: false,
+            baseLayerPicker: false
+        });
+
+
+
+    </script>
+</head>
+
+<body>
+    <div id="cesiumContainer" style="width:100%; height:100%;"></div>
+</body>
+
+</html>

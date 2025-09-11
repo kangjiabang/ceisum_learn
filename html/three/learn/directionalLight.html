@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Three.js DirectionalLight 示例</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <script type="module">
+        import * as THREE from "https://esm.sh/three@0.150.1";
+        import { OrbitControls } from "https://esm.sh/three@0.150.1/examples/jsm/controls/OrbitControls.js";
+
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+
+        // 相机
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(15, 15, 15);
+        camera.lookAt(0, 0, 0);
+
+        // 渲染器
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 控制器
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        // 坐标轴辅助器 (X=红, Y=绿, Z=蓝)
+        const axesHelper = new THREE.AxesHelper(10);
+        scene.add(axesHelper);
+
+        // 平面
+        const plane = new THREE.Mesh(
+            new THREE.PlaneGeometry(20, 20),
+            new THREE.MeshStandardMaterial({ color: 0x444444, side: THREE.DoubleSide })
+        );
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+
+        // Directional Light
+        const color = 0xFFFFFF;
+        const intensity = 3;
+        const light = new THREE.DirectionalLight(color, intensity);
+        light.position.set(0, 12, 0);           // 光源位置
+        light.target.position.set(-5, 0, 0);    // 光照目标点
+        scene.add(light);
+        scene.add(light.target);
+
+        // 光源可视化
+        const lightHelper = new THREE.DirectionalLightHelper(light, 2, 0xffff00);
+        scene.add(lightHelper);
+
+        // target 点可视化
+        const targetSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 10, 10),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+        );
+        targetSphere.position.copy(light.target.position);
+        scene.add(targetSphere);
+
+        // 渲染循环
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+    </script>
+</body>
+
+</html>
