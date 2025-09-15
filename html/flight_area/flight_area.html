@@ -46,6 +46,25 @@
       font-size: 12px;
       max-width: 300px;
     }
+
+    #tooltip {
+      position: absolute;
+      background: rgba(48, 51, 56, 0.9);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      /* 不影响鼠标穿透 */
+      z-index: 1001;
+      max-width: 200px;
+      text-align: center;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transform: translateY(-5px);
+      /* 微调动画感 */
+      transition: opacity 0.3s ease;
+    }
   </style>
 </head>
 
@@ -59,6 +78,7 @@
     • 起降场由多个矩形起降单元组成<br>
     • 子场景中可查看起降单元详情
   </div>
+  <div id="tooltip" style="display: none;"></div>
 
   <script type="module">
     Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
@@ -86,14 +106,30 @@
       {
         id: 'field1',
         name: '起降场 A',
-        center: Cesium.Cartesian3.fromDegrees(119.995161825460514, 30.275375425493404, 5),
+        center: Cesium.Cartesian3.fromDegrees(119.995161825460514, 30.275375425493404, 1),
         units: [
-          { position: Cesium.Cartesian3.fromDegrees(119.99476182546051, 30.275675425493404, 2), width: 50, height: 30 },
-          { position: Cesium.Cartesian3.fromDegrees(119.99526182546051, 30.275675425493404, 2), width: 50, height: 30 },
-          { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.275675425493404, 2), width: 50, height: 30 },
-          { position: Cesium.Cartesian3.fromDegrees(119.99476182546051, 30.275075425493404, 2), width: 50, height: 30 },
-          { position: Cesium.Cartesian3.fromDegrees(119.99526182546051, 30.275075425493404, 2), width: 50, height: 30 },
-          { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.275075425493404, 2), width: 50, height: 30 }
+          { position: Cesium.Cartesian3.fromDegrees(119.99476182546051, 30.275675425493404, 2), width: 30, height: 40 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99526182546051, 30.275675425493404, 2), width: 30, height: 40 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.275675425493404, 2), width: 30, height: 40 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99476182546051, 30.275075425493404, 2), width: 30, height: 40 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99526182546051, 30.275075425493404, 2), width: 30, height: 40 },
+          { position: Cesium.Cartesian3.fromDegrees(119.99576182546051, 30.275075425493404, 2), width: 30, height: 40 }
+        ],
+        weatherStations: [
+          {
+            id: 'ws1',
+            name: '气象站 #1',
+            position: Cesium.Cartesian3.fromDegrees(119.995161825460514, 30.275875425493404, 5), // 北侧，略高于地面
+            dimensions: new Cesium.Cartesian3(5, 5, 8), // 长宽高：5m x 5m x 8m
+            data: {
+              temperature: '26°C',
+              humidity: '65%',
+              windSpeed: '3.2 m/s',
+              windDirection: 'NE',
+              pressure: '1013 hPa',
+              updateTime: '2025-04-05 10:30'
+            }
+          }
         ]
         // },
         // {
@@ -185,7 +221,7 @@
             hierarchy: new Cesium.PolygonHierarchy(corners),
             material: new Cesium.ImageMaterialProperty({
               image: 'image.png',
-              repeat: new Cesium.Cartesian2(3, 3),
+              repeat: new Cesium.Cartesian2(1, 1),
               color: Cesium.Color.WHITE.withAlpha(0.9),
               transparent: true
             }),
@@ -221,17 +257,31 @@
           const south = latitude - halfHeightRad;
           const north = latitude + halfHeightRad;
 
+          // 👇 创建矩形四个角点（带高度）
+          const corners = [
+            Cesium.Cartesian3.fromRadians(west, south, height + 0.11), // 左下
+            Cesium.Cartesian3.fromRadians(west, north, height + 0.11), // 左上
+            Cesium.Cartesian3.fromRadians(east, north, height + 0.11), // 右上
+            Cesium.Cartesian3.fromRadians(east, south, height + 0.11), // 右下
+            Cesium.Cartesian3.fromRadians(west, south, height + 0.11)  // 闭合
+          ];
+
           const unit = viewer.entities.add({
             id: `${fieldData.id}_unit_${index}`,
-            position: unitData.position,
-            rectangle: {
-              coordinates: new Cesium.Rectangle(west, south, east, north),
-              height: height,
-              material: Cesium.Color.CYAN.withAlpha(0.7),
+            polygon: {
+              hierarchy: corners,
+              material: new Cesium.ImageMaterialProperty({
+                image: 'runway.png',
+                repeat: new Cesium.Cartesian2(1, 1),
+                color: Cesium.Color.WHITE,
+                transparent: true
+              }),
               outline: true,
               outlineColor: Cesium.Color.BLUE,
-              extrudedHeight: height + 5,
-              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
+              outlineWidth: 2,
+              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+              extrudedHeight: 1, // 高度厚度
+              extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
             },
             properties: {
               type: 'landingUnit',
@@ -243,9 +293,80 @@
             }
           });
 
+          // ✅ 再单独添加一个 label，放在矩形中心
+          const labelEntity = viewer.entities.add({
+            position: unitData.position,
+            label: {
+              text: '#' + (index + 1).toString(),
+              font: '14pt bold sans-serif',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+              pixelOffset: new Cesium.Cartesian2(0, -10),
+              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY // 防止被遮挡
+            },
+            properties: {
+              type: 'landingUnitLabel',
+              fieldId: fieldData.id,
+              unitIndex: index
+            }
+          });
+
+
+
           landingField.units.push(unit);
         });
 
+        if (fieldData.weatherStations && fieldData.weatherStations.length > 0) {
+          landingField.weatherStations = []; // 初始化数组
+
+          fieldData.weatherStations.forEach(ws => {
+            const wsEntity = viewer.entities.add({
+              id: `${fieldData.id}_weather_${ws.id}`,
+              position: Cesium.Cartesian3.fromDegrees(119.995161825460514, 30.275875425493404, 0.1), // 👈 匹配底座高度
+              box: {
+                dimensions: ws.dimensions,
+                material: new Cesium.ImageMaterialProperty({
+                  image: 'runway.png',
+                  repeat: new Cesium.Cartesian2(1, 1),
+                  color: Cesium.Color.WHITE,
+                  transparent: true
+                }),
+                //material: Cesium.Color.WHITE.withAlpha(0.8),
+                outline: true,
+                outlineColor: Cesium.Color.CYAN,
+                outlineWidth: 2,
+                heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND
+              },
+              label: {
+                text: ws.name,
+                font: '12pt sans-serif',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                pixelOffset: new Cesium.Cartesian2(0, -6),
+                heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY // 👈 关键！强制显示
+              },
+              properties: {
+                type: 'weatherStation',
+                fieldId: fieldData.id,
+                stationId: ws.id,
+                name: ws.name,
+                data: ws.data
+              }
+            });
+
+            landingField.weatherStations.push(wsEntity);
+          });
+        }
         // === 创建起降场边界标识（原有逻辑）===
         const boundary = viewer.entities.add({
           id: `${fieldData.id}_boundary`,
@@ -309,11 +430,11 @@
         destination: Cesium.Cartesian3.fromDegrees(
           Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(field.center).longitude),
           Cesium.Math.toDegrees(Cesium.Cartographic.fromCartesian(field.center).latitude),
-          500
+          200
         ),
         orientation: {
           heading: 0,
-          pitch: Cesium.Math.toRadians(-45),
+          pitch: Cesium.Math.toRadians(-70),
           roll: 0
         },
         duration: 2.0
@@ -365,8 +486,18 @@
     };
 
     // 点击事件处理
-    viewer.cesiumWidget.canvas.addEventListener('click', function (e) {
-      const pickedObject = viewer.scene.pick(viewer.camera.getPickRay(e));
+    // 动态提示框元素
+    const tooltip = document.getElementById('tooltip');
+
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+    // 左键点击：尝试添加航点（插入或追加）
+    handler.setInputAction((click) => {
+
+      const pickedObject = viewer.scene.pick(click.position);
+
+      // 清除之前的 tooltip 显示
+      tooltip.style.display = 'none';
 
       if (Cesium.defined(pickedObject) && Cesium.defined(pickedObject.id)) {
         const entity = pickedObject.id;
@@ -374,31 +505,128 @@
 
         if (properties && properties.type) {
           if (properties.type._value === 'landingField' && currentScene === 'main') {
-            // 点击起降场，进入子场景
             enterLandingFieldScene(properties.fieldId._value);
-          } else if (properties.type._value === 'landingUnit' && currentScene === 'landing') {
-            // 点击起降单元，显示详情
-            const unitInfo = `
-              <strong>起降单元详情：</strong><br>
-              • 所属场地: ${properties.fieldName._value}<br>
-              • 单元编号: ${properties.unitIndex._value + 1}<br>
-              • 尺寸: ${properties.width._value}m × ${properties.height._value}m<br>
-              • 状态: 可用
-            `;
-            document.getElementById('info').innerHTML = unitInfo;
+          }
+          else if (properties.type._value === 'landingUnit' && currentScene === 'landing') {
+            const unitIndex = properties.unitIndex._value;
+            const fieldName = properties.fieldName._value;
+            const width = properties.width._value;
+            const height = properties.height._value;
 
-            // 高亮显示选中的单元
-            entity.rectangle.material = Cesium.Color.ORANGE.withAlpha(0.8);
+            // 设置 tooltip 内容
+            tooltip.innerHTML = `
+            <strong>单元 #${unitIndex + 1}</strong><br>
+            ${width}m × ${height}m<br>
+            状态: 可用
+          `;
 
-            // 2秒后恢复原色
+            // 获取该起降单元中心的世界坐标（即 entity.position）
+            // ✅ 获取 polygon 中心点
+            const positions = entity.polygon.hierarchy.getValue(viewer.clock.currentTime).positions;
+            const boundingSphere = Cesium.BoundingSphere.fromPoints(positions);
+            const position = boundingSphere.center;
+
+            // 转换为屏幕坐标
+            const screenPosition = viewer.scene.cartesianToCanvasCoordinates(position);
+
+            if (Cesium.defined(screenPosition)) {
+              // 设置 tooltip 位置（略高于中心）
+              tooltip.style.left = `${screenPosition.x}px`;
+              tooltip.style.top = `${screenPosition.y - 40}px`; // 上方偏移 40px
+              tooltip.style.display = 'block';
+            }
+
+            // ✅✅✅ 关键修复：从 position 提取经纬高
+            const cartographic = Cesium.Cartographic.fromCartesian(position);
+            const lon = Cesium.Math.toDegrees(cartographic.longitude);
+            const lat = Cesium.Math.toDegrees(cartographic.latitude);
+            const alt = cartographic.height;
+
+            // ✅ 飞行到单元上方，便于观察
+            // viewer.camera.flyTo({
+            //   destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt + 100), // 上方50米
+            //   orientation: {
+            //     heading: viewer.camera.heading, // 保持当前方向（或设为0朝北）
+            //     pitch: Cesium.Math.toRadians(-90), // 俯视45度
+            //     roll: 0
+            //   },
+            //   duration: 1.5
+            // });
+            // 同时也可以高亮材质
+            // ✅ 高亮 polygon 或 rectangle
+            if (entity.polygon) {
+              const originalMaterial = entity.polygon.material;
+              entity.polygon.material = Cesium.Color.ORANGE.withAlpha(0.8);
+
+              setTimeout(() => {
+                entity.polygon.material = originalMaterial;
+                tooltip.style.display = 'none';
+              }, 2000);
+            } else if (entity.rectangle) {
+              const originalMaterial = entity.rectangle.material;
+              entity.rectangle.material = Cesium.Color.ORANGE.withAlpha(0.8);
+
+              setTimeout(() => {
+                entity.rectangle.material = originalMaterial;
+                tooltip.style.display = 'none';
+              }, 2000);
+            }
+
+            // 更新右上角 info 面板（可选保留）
+            document.getElementById('info').innerHTML = `
+            <strong>起降单元详情：</strong><br>
+            • 所属场地: ${fieldName}<br>
+            • 单元编号: ${unitIndex + 1}<br>
+            • 尺寸: ${width}m × ${height}m<br>
+            • 状态: 可用
+           `;
+          }
+          else if (properties.type._value === 'weatherStation' && currentScene === 'landing') {
+            const stationName = properties.name._value;
+            const data = properties.data._value;
+
+            tooltip.innerHTML = `
+            <strong>${stationName}</strong><br>
+            温度: ${data.temperature}<br>
+            湿度: ${data.humidity}<br>
+            风速: ${data.windSpeed}<br>
+            风向: ${data.windDirection}<br>
+            气压: ${data.pressure}<br>
+            更新: ${data.updateTime}
+          `;
+
+            const position = entity.position.getValue(viewer.clock.currentTime);
+            const screenPosition = viewer.scene.cartesianToCanvasCoordinates(position);
+
+            if (Cesium.defined(screenPosition)) {
+              tooltip.style.left = `${screenPosition.x}px`;
+              tooltip.style.top = `${screenPosition.y - 60}px`;
+              tooltip.style.display = 'block';
+            }
+
+
+            // ✅ 只高亮变色，不改变尺寸
+            //const originalMaterial = entity.box.material;
+            //entity.box.material = Cesium.Color.YELLOW.withAlpha(0.9);
+
             setTimeout(() => {
-              entity.rectangle.material = Cesium.Color.CYAN.withAlpha(0.7);
-            }, 2000);
+              // entity.box.material = originalMaterial;
+              tooltip.style.display = 'none';
+            }, 1000);
+
+            // 更新 info 面板
+            const carto = Cesium.Cartographic.fromCartesian(position);
+            document.getElementById('info').innerHTML = `
+              <strong>气象站详情：</strong><br>
+              • 名称: ${stationName}<br>
+              • 位置: ${Cesium.Math.toDegrees(carto.longitude).toFixed(4)}°, 
+              ${Cesium.Math.toDegrees(carto.latitude).toFixed(4)}°<br>
+              • 点击查看实时气象数据
+            `;
           }
         }
       }
-    });
-
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     // 加载 3D Tileset (如果可用)
     try {
       const tileset = viewer.scene.primitives.add(
