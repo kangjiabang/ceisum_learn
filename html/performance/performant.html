@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Cesium.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/cesium@1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+    <style>
+        html,
+        body,
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        #infoPanel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(48, 51, 56, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            max-width: 300px;
+        }
+
+        #tooltip {
+            position: absolute;
+            background: rgba(48, 51, 56, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1001;
+            max-width: 200px;
+            text-align: center;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+            transition: opacity .3s;
+        }
+
+        #performanceInfo {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(48, 51, 56, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="infoPanel">无人机监控系统：5000 架</div>
+    <div id="tooltip" style="display:none;"></div>
+    <div id="performanceInfo">加载中...</div>
+
+    <script type="module">
+        // Your access token can be found at: https://ion.cesium.com/tokens.    
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        const viewer = new Cesium.Viewer("cesiumContainer", {
+            infoBox: false,
+            selectionIndicator: false,
+            shadows: false,
+            shouldAnimate: true
+        });
+
+        const INSTANCE_COUNT = 5000;
+        const drones = [];
+        let selectedDroneEntity = null;
+        let selectedModel = null;
+
+        const tooltip = document.getElementById("tooltip");
+        const performanceInfo = document.getElementById("performanceInfo");
+
+        // Drone 类
+        class Drone {
+            constructor(id, position, status) {
+                this.id = id;
+                this.position = position;
+                this.status = status;
+                this.battery = Math.random() * 100;
+                this.altitude = Cesium.Cartographic.fromCartesian(position).height;
+                this.speed = 10 + Math.random() * 20;
+            }
+        }
+
+        function getStatusColor(status) {
+            return "./icons/drone.jpeg";
+            // switch (status) {
+            //     case "flying": return "/icons/drone.jpeg";
+            //     case "landing": return "/icons/drone.jpeg";
+            //     case "idle": return "/icons/drone.jpeg";
+            //     default: return "/icons/drone.jpeg";
+            // }
+        }
+
+        // 创建无人机（Billboard）
+        function createDroneBillboards() {
+            const centerLon = 119.995161825460514;
+            const centerLat = 30.275375425493404;
+
+            const start = performance.now();
+            for (let i = 0; i < INSTANCE_COUNT; i++) {
+                const lon = centerLon + (Math.random() - 0.5) * 0.02;
+                const lat = centerLat + (Math.random() - 0.5) * 0.02;
+                const alt = 50 + Math.random() * 150;
+                const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+
+                const status = ["flying", "landing", "idle"][Math.floor(Math.random() * 3)];
+                const id = `UAV-${String(i).padStart(5, "0")}`;
+                const drone = new Drone(id, pos, status);
+                drones.push(drone);
+
+                viewer.entities.add({
+                    id: id,
+                    position: pos,
+                    billboard: {
+                        image: getStatusColor(status),
+                        scale: 0.5,
+                        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                        heightReference: Cesium.HeightReference.NONE
+                    }
+                });
+            }
+            const end = performance.now();
+            performanceInfo.innerHTML = `无人机数量: ${INSTANCE_COUNT}<br>创建耗时: ${(end - start).toFixed(0)}ms<br>显示方式: Billboard + 单个3D模型`;
+        }
+
+        // 点击事件
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        handler.setInputAction((click) => {
+            const picked = viewer.scene.pick(click.position);
+
+            if (!picked || !picked.id) {
+                // 取消选中
+                if (selectedDroneEntity) {
+                    selectedDroneEntity.billboard.scale = 0.5;
+                    selectedDroneEntity = null;
+                }
+                if (selectedModel) {
+                    viewer.scene.primitives.remove(selectedModel);
+                    selectedModel = null;
+                }
+                tooltip.style.display = "none";
+                document.getElementById("infoPanel").innerHTML = "无人机监控系统：5000 架";
+                return;
+            }
+
+            // 找到无人机
+            const ent = picked.id;
+            const drone = drones.find(d => d.id === ent.id);
+            if (!drone) return;
+
+            // 取消上一个选中
+            if (selectedDroneEntity && selectedDroneEntity !== ent) {
+                selectedDroneEntity.billboard.scale = 0.5;
+            }
+            if (selectedModel) {
+                viewer.scene.primitives.remove(selectedModel);
+                selectedModel = null;
+            }
+
+            // 高亮 Billboard
+            selectedDroneEntity = ent;
+            selectedDroneEntity.billboard.scale = 0.8;
+
+
+            const carto_drone = Cesium.Cartographic.fromCartesian(drone.position);
+            const posWithOffset = Cesium.Cartesian3.fromDegrees(
+                Cesium.Math.toDegrees(carto_drone.longitude),
+                Cesium.Math.toDegrees(carto_drone.latitude),
+                carto_drone.height + 50  // 把模型抬高 50 米
+            );
+            // 在同位置加载 3D 模型
+            Cesium.Model.fromGltfAsync({
+                url: "./models/drone_costum.glb",
+                modelMatrix: Cesium.Transforms.eastNorthUpToFixedFrame(posWithOffset),
+                scale: 20
+            }).then(model => {
+                selectedModel = model;
+                viewer.scene.primitives.add(model);
+            });
+
+            // tooltip
+            const screen = viewer.scene.cartesianToCanvasCoordinates(drone.position);
+            if (screen) {
+                tooltip.style.left = `${screen.x}px`;
+                tooltip.style.top = `${screen.y - 40}px`;
+                tooltip.innerHTML = `
+          <strong>${drone.id}</strong><br>
+          状态: ${drone.status}<br>
+          高度: ${drone.altitude.toFixed(1)} m<br>
+          速度: ${drone.speed.toFixed(1)} m/s<br>
+          电量: ${drone.battery.toFixed(1)}%
+        `;
+                tooltip.style.display = "block";
+            }
+
+            // infoPanel
+            const carto = Cesium.Cartographic.fromCartesian(drone.position);
+            document.getElementById("infoPanel").innerHTML = `
+        <strong>无人机详情</strong><br>
+        ID: ${drone.id}<br>
+        状态: ${drone.status}<br>
+        高度: ${drone.altitude.toFixed(1)} m<br>
+        速度: ${drone.speed.toFixed(1)} m/s<br>
+        电量: ${drone.battery.toFixed(1)}%<br>
+        位置: ${Cesium.Math.toDegrees(carto.longitude).toFixed(4)}°, ${Cesium.Math.toDegrees(carto.latitude).toFixed(4)}°
+      `;
+
+            // 镜头飞到目标
+            viewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(
+                    Cesium.Math.toDegrees(carto.longitude),
+                    Cesium.Math.toDegrees(carto.latitude),
+                    drone.altitude + 200
+                ),
+                orientation: { pitch: Cesium.Math.toRadians(-30) },
+                duration: 1.5
+            });
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK); 
+
+        // 初始相机
+        viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(119.995161825460514, 30.275375425493404, 5000),
+            orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }
+        });
+
+        // 启动
+        createDroneBillboards();
+
+    </script>
+</body>
+
+</html>

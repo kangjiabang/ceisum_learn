@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Cesium + WebGPU Bounding Box (Fixed)</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        html,
+        body,
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        #webgpu-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="cesiumContainer"></div>
+    <canvas id="webgpu-overlay"></canvas>
+
+    <script>
+
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        // 初始化 Cesium
+        const viewer = new Cesium.Viewer('cesiumContainer', {
+            terrain: Cesium.Terrain.fromWorldTerrain(),
+            animation: false,
+            baseLayerPicker: false,
+            geocoder: false,
+            timeline: false,
+            navigationHelpButton: false,
+            infoBox: false
+        });
+
+        const canvas = document.getElementById('webgpu-overlay');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        async function initWebGPUBoundingBox(viewer, overlayCanvas) {
+            if (!navigator.gpu) {
+                alert("您的浏览器不支持 WebGPU，请使用 Chrome 113+ 或 Edge");
+                return;
+            }
+
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                alert("无法获取 WebGPU 适配器");
+                return;
+            }
+
+            const device = await adapter.requestDevice();
+
+            const context = overlayCanvas.getContext('webgpu');
+            const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+            context.configure({
+                device,
+                format: presentationFormat,
+                alphaMode: 'premultiplied',
+            });
+
+            // 定义单位立方体的8个顶点（AABB）
+            const boxVertices = new Float32Array([
+                -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, // 底面
+                -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1, // 顶面
+            ]);
+
+            // 12条边（每条边两个点）
+            const indices = new Uint16Array([
+                0, 1, 1, 2, 2, 3, 3, 0, // 底面
+                4, 5, 5, 6, 6, 7, 7, 4, // 顶面
+                0, 4, 1, 5, 2, 6, 3, 7  // 垂直边
+            ]);
+
+            const vertexBuffer = device.createBuffer({
+                size: boxVertices.byteLength,
+                usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+                mappedAtCreation: true,
+            });
+            new Float32Array(vertexBuffer.getMappedRange()).set(boxVertices);
+            vertexBuffer.unmap();
+
+            const indexBuffer = device.createBuffer({
+                size: indices.byteLength,
+                usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+                mappedAtCreation: true,
+            });
+            new Uint16Array(indexBuffer.getMappedRange()).set(indices);
+            indexBuffer.unmap();
+
+            const shaderCode = `
+        struct Uniforms {
+          viewProjectionMatrix: mat4x4<f32>,
+          modelMatrix: mat4x4<f32>,
+        };
+
+        @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+        @vertex
+        fn vs(
+          @location(0) position: vec3<f32>
+        ) -> @builtin(position) vec4<f32> {
+          let worldPos = uniforms.modelMatrix * vec4<f32>(position, 1.0);
+          return uniforms.viewProjectionMatrix * worldPos;
+        }
+
+        @fragment
+        fn fs() -> @location(0) vec4<f32> {
+          return vec4<f32>(1.0, 0.0, 0.0, 1.0); // 红色
+        }
+      `;
+
+            const shaderModule = device.createShaderModule({ code: shaderCode });
+
+            const bindGroupLayout = device.createBindGroupLayout({
+                entries: [
+                    { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+                ],
+            });
+
+            const uniformBuffer = device.createBuffer({
+                size: 128, // 2×mat4x4 = 128 bytes
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            });
+
+            const bindGroup = device.createBindGroup({
+                layout: bindGroupLayout,
+                entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+            });
+
+            const pipeline = device.createRenderPipeline({
+                layout: 'auto',
+                vertex: {
+                    module: shaderModule,
+                    entryPoint: 'vs',
+                    buffers: [{
+                        arrayStride: 3 * 4,
+                        attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }],
+                    }],
+                },
+                fragment: {
+                    module: shaderModule,
+                    entryPoint: 'fs',
+                    targets: [{ format: presentationFormat }],
+                },
+                primitive: {
+                    topology: 'line-list',
+                    cullMode: 'none',
+                },
+                depthStencil: {
+                    depthWriteEnabled: true,
+                    depthCompare: 'less',
+                    format: 'depth24plus',
+                },
+            });
+
+            let depthTexture;
+            function createDepthTexture() {
+                depthTexture?.destroy();
+                depthTexture = device.createTexture({
+                    size: [overlayCanvas.width, overlayCanvas.height],
+                    format: 'depth24plus',
+                    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+                });
+            }
+            createDepthTexture();
+
+            // ✅ 复用对象，避免内存分配
+            const tempViewProjection = new Cesium.Matrix4();
+            const tempViewProjArray = new Float32Array(16);
+            const tempModelArray = new Float32Array(16);
+            const tempUniformData = new Float32Array(128);
+
+            viewer.scene.postRender.addEventListener(() => {
+                const scene = viewer.scene;
+                const camera = scene.camera;
+
+                // ✅ 正确方式：获取视图和投影矩阵
+                const viewMatrix = camera.viewMatrix;
+                const projectionMatrix = camera.frustum.projectionMatrix;
+
+                // 计算 ViewProjection = projection * view
+                Cesium.Matrix4.multiply(projectionMatrix, viewMatrix, tempViewProjection);
+
+                // 设置包围盒中心：赤道上空1km
+                const centerPosition = Cesium.Cartesian3.fromDegrees(0, 0, 1000);
+                const modelMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(centerPosition);
+
+                // 转为数组（列主序，Cesium 默认格式）
+                Cesium.Matrix4.clone(tempViewProjection, tempViewProjArray);
+                Cesium.Matrix4.clone(modelMatrix, tempModelArray);
+
+                // 写入 uniform 缓冲区
+                for (let i = 0; i < 16; i++) {
+                    tempUniformData[i] = tempViewProjArray[i];
+                    tempUniformData[16 + i] = tempModelArray[i];
+                }
+
+                device.queue.writeBuffer(uniformBuffer, 0, tempUniformData);
+
+                // 渲染
+                const commandEncoder = device.createCommandEncoder();
+                const renderPassDescriptor = {
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        loadOp: 'load',
+                        storeOp: 'store',
+                    }],
+                    depthStencilAttachment: {
+                        view: depthTexture.createView(),
+                        depthLoadOp: 'load',
+                        depthStoreOp: 'store',
+                    },
+                };
+
+                const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
+                passEncoder.setPipeline(pipeline);
+                passEncoder.setBindGroup(0, bindGroup);
+                passEncoder.setVertexBuffer(0, vertexBuffer);
+                passEncoder.setIndexBuffer(indexBuffer, 'uint16');
+                passEncoder.drawIndexed(indices.length);
+                passEncoder.end();
+
+                device.queue.submit([commandEncoder.finish()]);
+            });
+
+            window.addEventListener('resize', () => {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                overlayCanvas.width = w;
+                overlayCanvas.height = h;
+                context.configure({
+                    device,
+                    format: presentationFormat,
+                    alphaMode: 'premultiplied',
+                });
+                createDepthTexture();
+            });
+        }
+
+        // 启动 WebGPU 渲染
+        initWebGPUBoundingBox(viewer, canvas);
+    </script>
+</body>
+
+</html>

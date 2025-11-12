@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SRS FLV 播放器</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #000;
+      display: flex;
+      justify-content: center;
+    }
+    #videoElement {
+      width: 800px;
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <video id="videoElement" controls autoplay muted></video>
+
+  <!-- 引入 flv.js（使用 CDN） -->
+  <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
+
+  <script>
+    if (flvjs.isSupported()) {
+      const videoElement = document.getElementById('videoElement');
+      const flvPlayer = flvjs.createPlayer({
+        type: 'flv',
+        url: 'http://172.16.26.24:8080/live/mystream.flv'
+      });
+      flvPlayer.attachMediaElement(videoElement);
+      flvPlayer.load();
+      flvPlayer.play().catch(e => {
+        console.warn('自动播放被阻止，请用户手动点击播放:', e);
+      });
+    } else {
+      alert('当前浏览器不支持 flv.js 播放');
+    }
+  </script>
+</body>
+</html>

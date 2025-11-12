@@ -89,7 +89,7 @@
 
         const tileset = viewer.scene.primitives.add(
           await Cesium.Cesium3DTileset.fromUrl(
-            "http://192.168.4.78:8000/tileset.json",
+            "https://gl.hangzhoudk.com/modelfile/tileset.json",
             { debugShowBoundingVolume: false }
           )
         );
@@ -219,7 +219,9 @@
           attributes: {
             color: Cesium.ColorGeometryInstanceAttribute.fromColor(
               // 使用浅灰白色：Gainsboro 或自定义灰白
-              Cesium.Color.GAINSBORO.withAlpha(0.9) // #DCDCDC，偏灰的“白”
+              //Cesium.Color.GAINSBORO.withAlpha(0.9) // #DCDCDC，偏灰的“白”
+              Cesium.Color.BLUE.withAlpha(0.7) ,// #DCDCDC，偏灰的“白”
+              //material: Cesium.Color.BLUE.withAlpha(0.7), // 蓝色半透明
               // 或使用：new Cesium.Color(0.9, 0.9, 0.92, 0.8) // R:230, G:230, B:234
             )
           }

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // 加载3DTileset
+    const tileset = await Cesium.Cesium3DTileset.fromUrl("https://gl.hangzhoudk.com/modelfile/tileset.json", {
+      debugShowBoundingVolume: false
+    });
+    viewer.scene.primitives.add(tileset);
+    viewer.zoomTo(tileset);
+
+    // ======================
+    // 🚀 模拟飞行路径
+    // ======================
+    const pathPositions = [
+      Cesium.Cartesian3.fromDegrees(116.391, 39.907, 200),
+      Cesium.Cartesian3.fromDegrees(116.392, 39.907, 220),
+      Cesium.Cartesian3.fromDegrees(116.393, 39.908, 250),
+      Cesium.Cartesian3.fromDegrees(116.394, 39.909, 220),
+      Cesium.Cartesian3.fromDegrees(116.395, 39.910, 200)
+    ];
+
+    const start = Cesium.JulianDate.now();
+    const positionProperty = new Cesium.SampledPositionProperty();
+    for (let i = 0; i < pathPositions.length; i++) {
+      const time = Cesium.JulianDate.addSeconds(start, i * 3, new Cesium.JulianDate());
+      positionProperty.addSample(time, pathPositions[i]);
+    }
+
+    // ✅ 自动计算朝向
+    const orientationProperty = new Cesium.VelocityOrientationProperty(positionProperty);
+
+    // ======================
+    // 🛸 创建无人机实体
+    // ======================
+    const droneEntity = viewer.entities.add({
+      name: "无人机",
+      position: positionProperty,
+      orientation: orientationProperty,
+      model: {
+        uri: "./models/drone_costum.glb",
+        scale: 2
+      }
+    });
+
+    // ======================
+    // 🔺 锥视视野可视化（终极修复：锥体尖端在无人机位置，向前延伸）
+    // ======================
+    const coneLength = 100.0;
+    const coneFov = Cesium.Math.toRadians(30);
+    const coneRadius = coneLength * Math.tan(coneFov);
+
+    // ✅ 关键：让圆柱体沿 X 轴延伸（无人机前向），而不是默认的 Z 轴
+    const rotationQuaternion = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Y, -Cesium.Math.PI_OVER_TWO);
+
+    const coneEntity = viewer.entities.add({
+      name: "无人机视野锥",
+      position: new Cesium.CallbackProperty(() => {
+        const dronePos = droneEntity.position.getValue(viewer.clock.currentTime);
+        const droneOri = droneEntity.orientation.getValue(viewer.clock.currentTime);
+        
+        // 计算无人机前向单位向量（X轴方向）
+        const forwardVector = new Cesium.Cartesian3(1, 0, 0);
+        const rotatedForward = Cesium.Matrix3.multiplyByVector(
+          Cesium.Matrix3.fromQuaternion(droneOri), 
+          forwardVector, 
+          new Cesium.Cartesian3()
+        );
+        
+        // 将锥体位置设在无人机前方一个长度处
+        // 这样锥体从该位置向后延伸，尖端正好落在无人机位置
+        const conePos = Cesium.Cartesian3.add(
+          dronePos, 
+          Cesium.Cartesian3.multiplyByScalar(rotatedForward, coneLength/2, new Cesium.Cartesian3()), 
+          new Cesium.Cartesian3()
+        );
+        
+        return conePos;
+      }, false),
+      orientation: new Cesium.CallbackProperty(() => {
+        const ori = droneEntity.orientation.getValue(viewer.clock.currentTime);
+        // 将 Cylinder 的 Z 轴旋转到 X 轴（即向前）→ 再乘以无人机朝向
+        return Cesium.Quaternion.multiply(ori, rotationQuaternion, new Cesium.Quaternion());
+      }, false),
+      cylinder: {
+        length: coneLength,
+        topRadius: 0.0,     // 尖端半径为0
+        bottomRadius: coneRadius, // 底部半径
+        material: Cesium.Color.YELLOW.withAlpha(0.3),
+        outline: true,
+        outlineColor: Cesium.Color.ORANGE
+      }
+    });
+
+    // ======================
+    // ⏱️ 设置时钟与相机跟随
+    // ======================
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = Cesium.JulianDate.addSeconds(start, (pathPositions.length - 1) * 3, new Cesium.JulianDate());
+    viewer.clock.currentTime = start.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.multiplier = 1.0;
+    viewer.trackedEntity = droneEntity;
+    
+    viewer.clock.shouldAnimate = true; // ✅ 启动动画
+  </script>
+</body>
+
+</html>

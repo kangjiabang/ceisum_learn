@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC 播放修复</title>
+    <script src="https://cdn.jsdelivr.net/npm/webrtc-adapter@7.4.0/adapter.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #video { border: 2px solid #333; background: #000; }
+        #status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>WebRTC 播放测试 - live/mystream</h1>
+    <button onclick="startPlayback()">开始播放</button>
+    <button onclick="stopPlayback()">停止播放</button>
+    
+    <div id="status" class="info">点击"开始播放"按钮</div>
+    
+    <video id="video" autoplay muted controls width="800" height="450"></video>
+    
+    <div>
+        <h3>连接信息：</h3>
+        <div id="connectionInfo"></div>
+    </div>
+
+    <script>
+        let pc = null;
+        const video = document.getElementById('video');
+        const status = document.getElementById('status');
+        const connectionInfo = document.getElementById('connectionInfo');
+
+        function updateStatus(message, type = 'info') {
+            status.textContent = message;
+            status.className = type;
+            console.log(message);
+        }
+
+        function updateConnectionInfo(info) {
+            connectionInfo.innerHTML = info;
+        }
+
+        async function startPlayback() {
+            if (pc) {
+                updateStatus('⚠️ 已有连接在运行', 'error');
+                return;
+            }
+
+            try {
+                updateStatus('🔄 初始化 WebRTC 连接...', 'info');
+                
+                // 创建 PeerConnection
+                pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                });
+
+                // 监听状态变化
+                pc.onconnectionstatechange = () => {
+                    const state = pc.connectionState;
+                    updateConnectionInfo(`连接状态: ${state}`);
+                    
+                    if (state === 'connected') {
+                        updateStatus('✅ WebRTC 连接成功！', 'success');
+                    } else if (state === 'failed' || state === 'disconnected') {
+                        updateStatus(`❌ 连接失败: ${state}`, 'error');
+                    }
+                };
+
+                pc.oniceconnectionstatechange = () => {
+                    updateConnectionInfo(`ICE状态: ${pc.iceConnectionState} | 连接状态: ${pc.connectionState}`);
+                };
+
+                pc.onsignalingstatechange = () => {
+                    updateConnectionInfo(`信令状态: ${pc.signalingState}`);
+                };
+
+                // 监听视频轨道
+                pc.ontrack = (event) => {
+                    updateStatus('🎬 收到视频轨道！', 'success');
+                    if (event.streams && event.streams[0]) {
+                        video.srcObject = event.streams[0];
+                        updateStatus('✅ 视频流开始播放！', 'success');
+                    }
+                };
+
+                // 添加接收器
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+
+                // 创建 Offer
+                updateStatus('🔄 创建 WebRTC Offer...', 'info');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // 连接到 SRS
+                updateStatus('🔄 连接到 SRS WebRTC...', 'info');
+                const response = await fetch('http://172.16.26.24:1985/rtc/v1/play/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        api: 'http://172.16.26.24:1985/rtc/v1/play/',
+                        sdp: offer.sdp,
+                        streamurl: 'webrtc://172.16.26.24:1985/live/mystream'
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('SRS 响应:', data);
+
+                if (data.code === 0) {
+                    updateStatus('✅ WebRTC 信令交换成功！', 'success');
+                    await pc.setRemoteDescription(new RTCSessionDescription({
+                        type: 'answer',
+                        sdp: data.sdp
+                    }));
+                } else {
+                    throw new Error(`SRS错误: ${data.code} - ${JSON.stringify(data)}`);
+                }
+
+            } catch (error) {
+                updateStatus(`❌ 错误: ${error.message}`, 'error');
+                console.error('详细错误:', error);
+                
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
+            }
+        }
+
+        function stopPlayback() {
+            if (pc) {
+                pc.close();
+                pc = null;
+                video.srcObject = null;
+                updateStatus('⏹️ 播放已停止', 'info');
+                updateConnectionInfo('');
+            }
+        }
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', stopPlayback);
+    </script>
+</body>
+</html>

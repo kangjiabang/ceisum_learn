@@ -13,22 +13,29 @@
     // Your access token can be found at: https://ion.cesium.com/tokens.
     // This is the default access token from your ion account
 
-    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+    //Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
 
     const viewer = new Cesium.Viewer("cesiumContainer", {
-      shouldDebug: true
+        imageryProvider: new Cesium.UrlTemplateImageryProvider({
+        url: "http://192.168.35.5:8000/hz12/{z}/{x}/{y}.jpg", // 根据你的实际路径调整
+        tms: true, // 关键：启用 TMS 模式（自动翻转 y）
+        maximumLevel: 18, // 根据你的数据最大层级设置
+        minimumLevel: 0,
+        rectangle: new Cesium.Rectangle.fromDegrees(118, 28, 123, 32), // 中国区域
+        credit: "水经注 TMS 数据"
+    })
     });
 
     // 存储创建的实体
-    let droneEntity = null;                                            
+    let droneEntity = null;
     let rayEntities = [];
 
     //加载 3D Tileset（自动解析 B3DM）
     const tileset = viewer.scene.primitives.add(
       await Cesium.Cesium3DTileset.fromUrl(
-        "https://gl.hangzhoudk.com/modelfile/tileset.json",
+       "https://gl.hangzhoudk.com/modelfile/tileset.json",
         {
-          debugShowBoundingVolume: false, // 优化动态加载
+          debugShowBoundingVolume: true, // 优化动态加载
         })
     );
 

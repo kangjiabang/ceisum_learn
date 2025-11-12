@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    // Your access token can be found at: https://ion.cesium.com/tokens.
+    // This is the default access token from your ion account
+
+    //Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      imageryProvider: new Cesium.UrlTemplateImageryProvider({
+        url: "http://192.168.35.5:8000/hz12/{z}/{x}/{y}.jpg", // ✅ 兼容TMS坐标
+        maximumLevel: 18,
+        rectangle: new Cesium.Rectangle.fromDegrees(118, 28, 123, 32), // 中国区域
+        credit: "水经注 TMS"
+      }),
+      baseLayerPicker: false,
+      imageryProviderViewModels: [],
+      selectedImageryProviderViewModel: undefined
+    });
+
+    viewer.camera.flyTo({
+  destination: Cesium.Rectangle.fromDegrees(118, 28, 123, 32) // 杭州区域
+});
+  </script>
+</body>
+
+</html>
