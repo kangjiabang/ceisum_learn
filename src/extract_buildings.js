@@ -25,7 +25,7 @@ async function init() {
     await Cesium.Cesium3DTileset.fromUrl(
       "https://gl.hangzhoudk.com/modelfile/tileset.json",
       {
-        debugShowBoundingVolume: true,
+        debugShowBoundingVolume: false,
       }
     )
   );

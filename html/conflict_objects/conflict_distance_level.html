@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cesium 冲突对象高亮示例</title>
+    <script src="https://cdn.jsdelivr.net/npm/cesium@1.111.0/Build/Cesium/Cesium.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/cesium@1.111.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+    // 存储创建的实体
+    let droneEntity = null;                                            
+    let rayEntities = [];
+
+    //加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "https://gl.hangzhoudk.com/modelfile/tileset.json",
+        {
+          debugShowBoundingVolume: false, // 优化动态加载
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+    // 监听鼠标点击事件
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+    const infoBox = document.getElementById('infoBox');
+
+    viewer.canvas.addEventListener('click', async (event) => {
+      // 清除之前的无人机和射线
+      if (droneEntity) {
+        viewer.entities.remove(droneEntity);
+        droneEntity = null;
+      }
+
+      // 清除之前的射线实体
+      rayEntities.forEach(entity => {
+        viewer.entities.remove(entity);
+      });
+      rayEntities = [];
+
+      // 获取鼠标在画布中的相对坐标
+      const rect = viewer.canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const clickPosition = new Cesium.Cartesian2(x, y);
+
+      // 检测地形交点
+      const cartesian = viewer.scene.pickPosition(clickPosition);
+      if (!cartesian) {
+        console.log("未拾取到模型或地形");
+        return;
+      }
+
+      const cartographic_click = Cesium.Cartographic.fromCartesian(cartesian);
+      const longitude_click = Cesium.Math.toDegrees(cartographic_click.longitude);
+      const latitude_click = Cesium.Math.toDegrees(cartographic_click.latitude);
+      const height_click = cartographic_click.height.toFixed(2);
+
+      console.log("点击坐标（经纬度）:", { longitude_click, latitude_click, height_click });
+
+        // 设置无人机位置为地形高度 + 适当偏移
+        const initialPosition = Cesium.Cartesian3.fromDegrees(
+            longitude_click, 
+            latitude_click, 
+            50 // 在地形高度基础上增加50米
+        );
+
+     
+        const heading = Cesium.Math.toRadians(-90); // 水平方向偏转90度
+        const pitch = Cesium.Math.toRadians(0);    // 俯仰角 0 度
+        const roll = Cesium.Math.toRadians(0);     // 滚转角 0 度
+
+        const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
+        const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+            initialPosition, // 无人机的当前位置
+            hpr
+        );
+
+        droneEntity = viewer.entities.add({
+            name: "无人机",
+            position: initialPosition,
+            orientation: orientation,
+            model: {
+                uri: "/models/drone_costum.glb",
+                minimumPixelSize: 128,
+                maximumScale: 200,
+                scale: 10,
+            }
+        })
+
+        // 定位到 Tileset
+        viewer.flyTo(droneEntity); 
+        //viewer.zoomTo();
+
+        // 假设 droneEntity.position 为当前无人机位置
+       scanSurroundings(initialPosition, viewer, tileset, 20, 10); // 每5度一条，取最近3个
+
+    });
+
+    
+    
+function scanSurroundings(dronePosition, viewer, tileset, angleStep = 10, topN = 10) {
+  const hits = [];
+
+  // 获取当地ENU坐标系
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(dronePosition);
+  const up = Cesium.Matrix4.getColumn(enu, 2, new Cesium.Cartesian3()); // z-axis
+
+  // 在水平面（垂直于 up）发射射线
+  for (let angle = 0; angle < 360; angle += angleStep) {
+    const rad = Cesium.Math.toRadians(angle);
+    // 射线方向：水平向东旋转 angle
+    const direction = new Cesium.Cartesian3(
+      Math.cos(rad),
+      Math.sin(rad),
+      0
+    );
+    // 转换到世界坐标系
+    const worldDirection = Cesium.Matrix4.multiplyByPointAsVector(enu, direction, new Cesium.Cartesian3());
+    Cesium.Cartesian3.normalize(worldDirection, worldDirection);
+
+    const ray = new Cesium.Ray(dronePosition, worldDirection);
+
+    // 射线与 3D Tiles 求交（最大检测距离 200 米）
+    const maxDistance = 200.0;
+
+
+    // 可视化射线
+    //showRayBuildingHeight();
+    // 射线检测
+    const result = viewer.scene.pickFromRay(ray);
+    if (!result) {
+      console.log(`❌ 射线未穿过任何物体`);
+      continue;
+    }
+
+    
+    if (result) {
+      const hitPosition = result.position;
+      const distance = Cesium.Cartesian3.distance(dronePosition, hitPosition);
+      hits.push({ position: hitPosition, distance, ray });
+    }
+  }
+
+  // 按距离排序，取最近 topN 个
+  hits.sort((a, b) => a.distance - b.distance);
+  const topHits = hits.slice(0, topN);
+
+  // 清除旧射线（可选）
+  //clearPreviousRays(viewer); // 你需要实现这个函数
+
+  // 可视化射线和标签
+  topHits.forEach(hit => {
+    // 创建标签位置，稍微向上偏移以避免与地面重合
+    const labelPosition = new Cesium.Cartesian3(
+      hit.position.x,
+      hit.position.y,
+      hit.position.z + 5 // 向上偏移5米
+    );
+
+    // 添加射线和标签实体
+    const entity = viewer.entities.add({
+      polyline: {
+        positions: [dronePosition, hit.position],
+        width: 2,
+        material: hit.distance < 10 ? Cesium.Color.RED : Cesium.Color.ORANGE
+      },
+      position: labelPosition, // 将实体位置设置为标签位置
+      label: {
+        text: `${hit.distance.toFixed(1)}m`,
+        font: '14px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -15),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY // 确保标签始终可见
+      }
+    });
+    
+    // 将实体添加到rayEntities数组以便后续清除
+    rayEntities.push(entity);
+  });
+
+  return topHits;
+}
+</script>
+</body>
+</html>
