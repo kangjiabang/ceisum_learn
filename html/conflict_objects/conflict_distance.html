@@ -81,7 +81,7 @@
         const initialPosition = Cesium.Cartesian3.fromDegrees(
             longitude_click, 
             latitude_click, 
-            50 // 在地形高度基础上增加50米
+            150 // 在地形高度基础上增加50米
         );
 
      
@@ -103,7 +103,20 @@
                 uri: "/models/drone_costum.glb",
                 minimumPixelSize: 128,
                 maximumScale: 200,
-                scale: 10,
+                scale: 3,
+            },
+            // 添加无人机标签，初始为空
+            label: {
+                text: '',
+                font: '16px sans-serif',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.RED,
+                outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -30),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                show: false // 初始不显示
             }
         })
 
@@ -112,7 +125,7 @@
         //viewer.zoomTo();
 
         // 假设 droneEntity.position 为当前无人机位置
-       scanSurroundings(initialPosition, viewer, tileset, 20, 1000); // 每5度一条，取最近3个
+       scanSurroundings(initialPosition, viewer, tileset, 30, 5); // 每5度一条，取最近3个
 
     });
 
@@ -221,6 +234,9 @@ function scanSurroundings(dronePosition, viewer, tileset, angleStep = 10, topN =
   hits.sort((a, b) => a.distance - b.distance);
   const topHits = hits.slice(0, topN);
 
+  // 检查最近的障碍物并更新无人机标签
+  updateDroneWarningLabel(droneEntity, topHits);
+
   // 可视化射线和标签
   topHits.forEach(hit => {
     // 创建标签位置，稍微向上偏移以避免与地面重合
@@ -230,18 +246,15 @@ function scanSurroundings(dronePosition, viewer, tileset, angleStep = 10, topN =
       hit.position.z + 5 // 向上偏移5米
     );
 
-    // 添加射线和标签实体
+    //添加射线和标签实体
     const entity = viewer.entities.add({
       polyline: {
         positions: [dronePosition, hit.position],
         width: 2,
-        material: hit.type === 'cone' ? 
-                 (hit.distance < 10 ? Cesium.Color.RED : 
-                  hit.distance < 30 ? Cesium.Color.ORANGE : 
-                  Cesium.Color.YELLOW) :
-                 (hit.distance < 10 ? Cesium.Color.BLUE : 
-                  hit.distance < 30 ? Cesium.Color.CYAN : 
-                  Cesium.Color.LIGHTBLUE)
+        material: 
+                 (hit.distance < 50 ? Cesium.Color.RED : 
+                  hit.distance < 100 ? Cesium.Color.ORANGE : 
+                  Cesium.Color.GREEN)
       },
       position: labelPosition, // 将实体位置设置为标签位置
       label: {
@@ -262,6 +275,43 @@ function scanSurroundings(dronePosition, viewer, tileset, angleStep = 10, topN =
   });
 
   return topHits;
+}
+
+// 更新无人机警告标签
+function updateDroneWarningLabel(droneEntity, hits) {
+  if (!droneEntity || hits.length === 0) {
+    // 如果没有检测到障碍物，隐藏警告标签
+    droneEntity.label.show = false;
+    droneEntity.label.text = '';
+    return;
+  }
+
+  // 获取最近的障碍物
+  const nearestHit = hits[0];
+  const distance = nearestHit.distance;
+
+  // 根据距离设置警告信息
+  if (distance < 50) {
+    // 距离小于50米：撞击警告
+    droneEntity.label.show = true;
+    droneEntity.label.text = `⚠️ 撞击警告! ${distance.toFixed(1)}m`;
+    droneEntity.label.fillColor = Cesium.Color.WHITE;
+    droneEntity.label.outlineColor = Cesium.Color.RED;
+    droneEntity.label.outlineWidth = 4;
+    droneEntity.label.font = 'bold 20px sans-serif';
+  } else if (distance < 100) {
+    // 距离小于100米：接近警告
+    droneEntity.label.show = true;
+    droneEntity.label.text = `⚠️ 接近警告! ${distance.toFixed(1)}m`;
+    droneEntity.label.fillColor = Cesium.Color.WHITE;
+    droneEntity.label.outlineColor = Cesium.Color.ORANGE;
+    droneEntity.label.outlineWidth = 3;
+    droneEntity.label.font = 'bold 18px sans-serif';
+  } else {
+    // 距离大于100米：无警告
+    droneEntity.label.show = false;
+    droneEntity.label.text = '';
+  }
 }
 </script>
 </body>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cesium 最近无人机检测示例</title>
+    <script src="https://cdn.jsdelivr.net/npm/cesium@1.111.0/Build/Cesium/Cesium.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/cesium@1.111.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<script type="module">
+  import {calculateAndConnectNearestByPositions, randomOffset, clearEntities} from '../../src/drone_distance_utils.js';
+  import {getNearstBuildingsWithinDistance} from '../../src/poligon_infos_intersect_distance.js';
+    import {updateHighlightedBuilding} from '../../src/draw_buildings.js';
+
+  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+   const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true
+    });
+
+//加载 3D Tileset（自动解析 B3DM）
+    const tileset = viewer.scene.primitives.add(
+      await Cesium.Cesium3DTileset.fromUrl(
+        "https://gl.hangzhoudk.com/modelfile/tileset.json",
+        {
+          debugShowBoundingVolume: false, // 优化动态加载
+        })
+    );
+
+    tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+      console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+    });
+
+    // 定位到 Tileset
+    viewer.zoomTo(tileset);
+
+  // 存储无人机实体和连线实体
+  let droneEntities = [];
+  let lineEntities = [];
+
+  // 清理所有无人机 & 连线
+  function clearAll() {
+
+
+      clearEntities(droneEntities, viewer);
+      droneEntities = [];
+
+      clearEntities(lineEntities, viewer);
+      lineEntities = [];
+  }
+
+  // 点击生成无人机
+  viewer.canvas.addEventListener("click",async (event) => {
+      clearAll();
+
+      const rect = viewer.canvas.getBoundingClientRect();
+      const clickPos = new Cesium.Cartesian2(
+          event.clientX - rect.left,
+          event.clientY - rect.top
+      );
+
+      const worldPos = viewer.scene.pickPosition(clickPos);
+      if (!worldPos) return;
+
+      const carto = Cesium.Cartographic.fromCartesian(worldPos);
+      const lon = Cesium.Math.toDegrees(carto.longitude);
+      const lat = Cesium.Math.toDegrees(carto.latitude);
+      const height = 150;
+
+      // 中心无人机实体
+      const centerDrone = viewer.entities.add({
+          name: "CenterDrone",
+          position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+          model: {
+              uri: "/models/drone_costum.glb",
+              scale: 3,
+          }
+      });
+      droneEntities.push(centerDrone);
+
+      // 随机生成其他 10 个无人机实体
+      const otherPositions = [];
+      // 随机生成其他 1个起降场实体
+      const landingPositions = [];
+      for (let i = 0; i < 10; i++) {
+          const dLon = lon + randomOffset(0.001);
+          const dLat = lat + randomOffset(0.001);
+          const pos = Cesium.Cartesian3.fromDegrees(dLon, dLat, height + Math.random() * 10);
+          otherPositions.push(pos);
+
+          const drone = viewer.entities.add({
+              name: `Drone-${i}`,
+              position: pos,
+              model: {
+                  uri: "/models/drone_costum.glb",
+                  scale: 2.5
+              }
+          });
+          droneEntities.push(drone);
+      }
+
+       const landPos = Cesium.Cartesian3.fromDegrees(lon + 0.005, lat + + 0.005, height + Math.random() * 10);
+
+      // 直接使用位置数组计算最近无人机并连线
+      const nearestEntities = calculateAndConnectNearestByPositions({
+          centerPos: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+          otherPositions: otherPositions,
+          count: 3,
+          redThreshold: 50,
+          orangeThreshold: 120,
+          prefixText: "距离无人机",
+          viewer: viewer
+      });
+
+      landingPositions.push(landPos)
+      const dronePoint =  Cesium.Cartesian3.fromDegrees(lon, lat, height);
+
+       const detectionRadius = 200; // 设置检测半径
+      // 直接使用位置数组计算最近无人机并连线
+      const landingEntities = calculateAndConnectNearestByPositions({
+          centerPos: dronePoint,
+          otherPositions: landingPositions,
+          count: 1,
+          redThreshold: 50,
+          orangeThreshold: 120,
+          prefixText: "距离起降场",
+          viewer: viewer
+      });
+
+      lineEntities.push(...nearestEntities);
+      lineEntities.push(...landingEntities);
+
+      
+       const nearest =  await getNearstBuildingsWithinDistance(dronePoint, detectionRadius)
+
+       updateHighlightedBuilding(nearest, viewer);
+
+       // 直接使用位置数组计算最近无人机并连线
+      const landingEntities = calculateAndConnectNearestByPositions({
+          centerPos: dronePoint,
+          otherPositions: landingPositions,
+          count: 1,
+          redThreshold: 50,
+          orangeThreshold: 120,
+          prefixText: "距离起降场",
+          viewer: viewer
+      });
+
+      viewer.flyTo(centerDrone);
+  });
+</script>
+</body>
+</html>
