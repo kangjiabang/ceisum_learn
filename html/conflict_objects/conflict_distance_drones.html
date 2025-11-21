@@ -79,16 +79,15 @@
           name: "CenterDrone",
           position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
           model: {
-              uri: "/models/drone_costum.glb",
-              scale: 3,
+              uri: "/models/four_drone.glb",
+              scale: 5,
           }
       });
       droneEntities.push(centerDrone);
 
       // 随机生成其他 10 个无人机实体
       const otherPositions = [];
-      // 随机生成其他 1个起降场实体
-      const landingPositions = [];
+      
       for (let i = 0; i < 10; i++) {
           const dLon = lon + randomOffset(0.001);
           const dLat = lat + randomOffset(0.001);
@@ -99,8 +98,8 @@
               name: `Drone-${i}`,
               position: pos,
               model: {
-                  uri: "/models/drone_costum.glb",
-                  scale: 2.5
+                  uri: "/models/four_drone.glb",
+                  scale: 5
               }
           });
           droneEntities.push(drone);
@@ -118,7 +117,8 @@
           prefixText: "距离无人机",
           viewer: viewer
       });
-
+      // 随机生成其他 1个起降场实体
+      const landingPositions = [];
       landingPositions.push(landPos)
       const dronePoint =  Cesium.Cartesian3.fromDegrees(lon, lat, height);
 
@@ -140,18 +140,24 @@
       
        const nearest =  await getNearstBuildingsWithinDistance(dronePoint, detectionRadius)
 
-       updateHighlightedBuilding(nearest, viewer);
+       const buildingsCenter = updateHighlightedBuilding(nearest, viewer,dronePoint);
 
+       // 获取建筑物实体
+      const buildingPositions = [];
+      buildingPositions.push(buildingsCenter)
        // 直接使用位置数组计算最近无人机并连线
-      const landingEntities = calculateAndConnectNearestByPositions({
+      const buildingsEntities = calculateAndConnectNearestByPositions({
           centerPos: dronePoint,
-          otherPositions: landingPositions,
+          otherPositions: buildingPositions,
           count: 1,
           redThreshold: 50,
           orangeThreshold: 120,
-          prefixText: "距离起降场",
+          prefixText: `距离建筑物`,
           viewer: viewer
       });
+
+      lineEntities.push(...buildingsEntities);
+
 
       viewer.flyTo(centerDrone);
   });
