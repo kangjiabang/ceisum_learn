@@ -226,12 +226,16 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
  * @param {Array<Object>} nearestBuildings - 包含建筑物信息 (polygon, actualDistance) 的数组。
  * @param {Cesium.Viewer} viewer - Cesium Viewer 实例。
  * @param {Cesium.Cartesian3} dronePosition - 无人机/中心点位的 Cartesian3 坐标。
+ * @param {Object} buildingColors - 颜色阈值配置。
+ * @param {number} [buildingColors.redThreshold=50] - 红色阈值距离（米）。
+ * @param {number} [buildingColors.orangeThreshold=120] - 橙色阈值距离（米）。
  * @returns {Array<Cesium.Cartesian3>} - 返回所有高亮建筑物的中心笛卡尔坐标数组。
  */
 export function updateHighlightedMultipleBuildings(
   nearestBuildings,
   viewer,
-  dronePosition
+  dronePosition,
+  buildingColors = { redThreshold: 50, orangeThreshold: 120 } // 默认值
 ) {
   // 1. 清除上一次所有高亮（包括单个和多个）
   clearAllHighlights(viewer);
@@ -242,18 +246,32 @@ export function updateHighlightedMultipleBuildings(
     return highlightedCenters;
   }
 
+  const { redThreshold, orangeThreshold } = buildingColors;
+
   const droneHeight = dronePosition
     ? Cesium.Cartographic.fromCartesian(dronePosition).height
     : 0;
 
   for (const item of nearestBuildings) {
     const currentId = item.polygon.properties.id;
+    const actualDistance = item.actualDistance; // 获取实际距离
 
     const coordinates = parseWKTCoordinates(item.polygon.properties.wkt);
     if (!coordinates) {
       console.error("Failed to parse WKT coordinates for building:", currentId);
       continue;
     }
+
+    // --- 新增：根据距离确定颜色 ---
+    let highlightColor;
+    if (actualDistance < redThreshold) {
+      highlightColor = Cesium.Color.RED;
+    } else if (actualDistance < orangeThreshold) {
+      highlightColor = Cesium.Color.ORANGE;
+    } else {
+      highlightColor = Cesium.Color.GREEN;
+    }
+    // ----------------------------
 
     // 1. 计算原始坐标的中心点（经纬度）
     const centerLonLat = calculateCentroid(coordinates);
@@ -311,20 +329,24 @@ export function updateHighlightedMultipleBuildings(
         hierarchy: Cesium.Cartesian3.fromDegreesArray(coords),
         extrudedHeight: buildingHeight,
         height: 10,
-        material: Cesium.Color.RED.withAlpha(0.5),
+        // --- 应用高亮颜色 ---
+        material: highlightColor.withAlpha(0.5),
         outline: true,
-        outlineColor: Cesium.Color.YELLOW,
+        outlineColor: highlightColor,
+        // --------------------
         outlineWidth: 5,
         classificationType: Cesium.ClassificationType.BOTH,
       },
       label: {
         // 标签显示实际距离
-        text: `⚠️ 障碍物\n实际距离: ${item.actualDistance.toFixed(
+        text: `⚠️ 障碍物\n实际距离: ${actualDistance.toFixed(
           1
         )}m\n高度: ${buildingHeight}m`,
         font: "14px sans-serif",
         fillColor: Cesium.Color.WHITE,
-        backgroundColor: Cesium.Color.RED,
+        // --- 应用标签背景颜色 ---
+        backgroundColor: highlightColor,
+        // ------------------------
         backgroundOpacity: 0.7,
         showBackground: true,
         pixelOffset: new Cesium.Cartesian2(0, -50),
