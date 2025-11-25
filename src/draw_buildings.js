@@ -1,9 +1,12 @@
 import { parseWKTCoordinates, bufferPolygon } from "/src/parse_buildings.js";
 
+// 用于管理单个高亮的实体和ID (供 updateHighlightedBuilding 使用)
 let lastBuildingId = null;
 let highlightedBuildingEntity = null;
-// 添加一个变量来存储当前高亮实体的中心点坐标
 let currentHighlightedCenter = null;
+
+// 用于管理多个高亮的实体列表 (供 updateHighlightedMultipleBuildings 使用)
+let highlightedBuildingEntities = [];
 
 // 计算多边形的几何中心（质心）
 function calculateCentroid(coordinates) {
@@ -60,11 +63,65 @@ function convertToCartesianWithHeight(centerLonLat, height) {
   );
 }
 
+export function clearHighlightedBuilding() {
+  if (highlightedBuildingEntity) {
+    highlightedBuildingEntity.show = false;
+    // 也可以选择隐藏整个实体
+    // highlightedBuildingEntity.show = false;
+  }
+  // 清除存储的中心点坐标
+  currentHighlightedCenter = null;
+}
+
+// 可选：添加一个函数来获取当前高亮建筑的中心点坐标
+export function getCurrentHighlightedCenter() {
+  return currentHighlightedCenter;
+}
+
+/**
+ * 清除所有当前的高亮实体，无论是单个还是多个。
+ * @param {Cesium.Viewer} viewer - Cesium Viewer 实例
+ */
+function clearAllHighlights(viewer) {
+  // 1. 清除单个高亮实体
+  if (highlightedBuildingEntity) {
+    viewer.entities.remove(highlightedBuildingEntity);
+    highlightedBuildingEntity = null;
+  }
+  lastBuildingId = null;
+  currentHighlightedCenter = null;
+
+  // 2. 清除多个高亮实体列表
+  for (const entity of highlightedBuildingEntities) {
+    viewer.entities.remove(entity);
+  }
+  highlightedBuildingEntities = [];
+}
+
+/**
+ * 高亮单个最近的建筑物，并返回其中心笛卡尔坐标。
+ *
+ * @param {Object} nearest - 包含单个建筑物信息 { polygon, actualDistance }。
+ * @param {Cesium.Viewer} viewer - Cesium Viewer 实例。
+ * @param {Cesium.Cartesian3} dronePosition - 无人机/中心点位的 Cartesian3 坐标。
+ * @returns {Cesium.Cartesian3 | undefined} - 返回高亮建筑物的中心笛卡尔坐标，如果失败则返回 undefined。
+ */
 export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
   const currentId = nearest.polygon.properties.id;
-  if (currentId === lastBuildingId) {
-    return; // ✅ 相同建筑，不更新，避免多余开销
+
+  // 1. 【修改点】如果 ID 相同，且没有多重高亮被激活，则不更新
+  // 如果当前只有一个高亮实体且ID相同，且没有其他多重高亮实体，则直接返回
+  if (
+    currentId === lastBuildingId &&
+    highlightedBuildingEntities.length === 0
+  ) {
+    return currentHighlightedCenter;
   }
+
+  // 2. 【修改点】先清理所有旧的高亮
+  clearAllHighlights(viewer);
+
+  // 此时，设置新的 lastBuildingId
   lastBuildingId = currentId;
 
   const coordinates = parseWKTCoordinates(nearest.polygon.properties.wkt);
@@ -73,15 +130,15 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
     return;
   }
 
-  // 1. 计算原始坐标的中心点（经纬度）
+  // 3. 计算原始坐标的中心点（经纬度）
   const centerLonLat = calculateCentroid(coordinates);
   if (!centerLonLat) {
     console.error("Failed to calculate centroid for building:", currentId);
     return;
   }
 
-  // 2. 获取建筑物高度，用于中心点的高度
-  const buildingHeight = nearest.polygon.properties.height; // 假设这是建筑物的高度
+  // 4. 获取建筑物高度，用于中心点的高度
+  const buildingHeight = nearest.polygon.properties.height;
 
   const droneHeight = dronePosition
     ? Cesium.Cartographic.fromCartesian(dronePosition).height
@@ -93,7 +150,7 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
     centerHeight = droneHeight;
   }
 
-  // 3. 将中心点经纬度和高度转换为笛卡尔坐标
+  // 5. 将中心点经纬度和高度转换为笛卡尔坐标 (用于连线起点/地面高度)
   const centerCartesian = convertToCartesianWithHeight(
     centerLonLat,
     centerHeight
@@ -106,16 +163,17 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
     return;
   }
 
+  // 6. 顶部中心点（用于 Polygon position）
   const centerTopCartesian = convertToCartesianWithHeight(
     centerLonLat,
     buildingHeight
   );
 
-  // 4. 存储当前中心点坐标（包含高度）
+  // 7. 存储当前中心点坐标（包含高度）
   currentHighlightedCenter = centerCartesian;
 
-  // 5. 获取缓冲后的坐标用于绘制多边形
-  const coords = bufferPolygon(coordinates, 2); // 假设 bufferPolygon 返回 [lon, lat, lon, lat, ...] 格式
+  // 8. 获取缓冲后的坐标用于绘制多边形
+  const coords = bufferPolygon(coordinates, 2);
   if (!coords) {
     console.error(
       "Failed to buffer polygon coordinates for building:",
@@ -124,15 +182,135 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
     return;
   }
 
-  if (!highlightedBuildingEntity) {
-    // 第一次创建
-    highlightedBuildingEntity = viewer.entities.add({
+  // 9. 创建实体
+  highlightedBuildingEntity = viewer.entities.add({
+    name: `高亮建筑 ID: ${currentId}`,
+    position: centerTopCartesian,
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(coords),
+      extrudedHeight: buildingHeight,
+      height: 10,
+      material: Cesium.Color.RED.withAlpha(0.5),
+      outline: true,
+      outlineColor: Cesium.Color.YELLOW,
+      outlineWidth: 5,
+      classificationType: Cesium.ClassificationType.BOTH,
+    },
+    label: {
+      // 标签显示实际距离
+      text: `⚠️ 障碍物\n实际距离: ${nearest.actualDistance.toFixed(
+        1
+      )}m\n高度: ${buildingHeight}m`,
+      font: "14px sans-serif",
+      fillColor: Cesium.Color.WHITE,
+      backgroundColor: Cesium.Color.RED,
+      backgroundOpacity: 0.7,
+      showBackground: true,
+      pixelOffset: new Cesium.Cartesian2(0, -50),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      scale: 0.8,
+      scaleByDistance: new Cesium.NearFarScalar(100.0, 1.0, 3000.0, 0.3),
+      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+        0.0,
+        5000.0
+      ),
+    },
+  });
+
+  return centerCartesian;
+}
+
+/**
+ * 高亮多个最近的建筑物，并返回它们的中心笛卡尔坐标。
+ *
+ * @param {Array<Object>} nearestBuildings - 包含建筑物信息 (polygon, actualDistance) 的数组。
+ * @param {Cesium.Viewer} viewer - Cesium Viewer 实例。
+ * @param {Cesium.Cartesian3} dronePosition - 无人机/中心点位的 Cartesian3 坐标。
+ * @returns {Array<Cesium.Cartesian3>} - 返回所有高亮建筑物的中心笛卡尔坐标数组。
+ */
+export function updateHighlightedMultipleBuildings(
+  nearestBuildings,
+  viewer,
+  dronePosition
+) {
+  // 1. 清除上一次所有高亮（包括单个和多个）
+  clearAllHighlights(viewer);
+
+  const highlightedCenters = [];
+
+  if (!nearestBuildings || nearestBuildings.length === 0) {
+    return highlightedCenters;
+  }
+
+  const droneHeight = dronePosition
+    ? Cesium.Cartographic.fromCartesian(dronePosition).height
+    : 0;
+
+  for (const item of nearestBuildings) {
+    const currentId = item.polygon.properties.id;
+
+    const coordinates = parseWKTCoordinates(item.polygon.properties.wkt);
+    if (!coordinates) {
+      console.error("Failed to parse WKT coordinates for building:", currentId);
+      continue;
+    }
+
+    // 1. 计算原始坐标的中心点（经纬度）
+    const centerLonLat = calculateCentroid(coordinates);
+    if (!centerLonLat) {
+      console.error("Failed to calculate centroid for building:", currentId);
+      continue;
+    }
+
+    // 2. 获取建筑物高度，用于中心点的高度
+    const buildingHeight = item.polygon.properties.height;
+
+    // 计算中心点的 Z 轴高度 (取无人机高度和建筑高度的较小值)
+    let centerHeight;
+    if (droneHeight > buildingHeight) {
+      centerHeight = buildingHeight;
+    } else {
+      centerHeight = droneHeight;
+    }
+
+    // 3. 将中心点经纬度和高度转换为笛卡尔坐标 (用于连线起点/地面高度)
+    const centerCartesian = convertToCartesianWithHeight(
+      centerLonLat,
+      centerHeight
+    );
+
+    // 4. 计算顶部中心点 (用于实体位置)
+    const centerTopCartesian = convertToCartesianWithHeight(
+      centerLonLat,
+      buildingHeight
+    );
+
+    if (!centerCartesian) {
+      console.error(
+        "Failed to convert center coordinates to Cartesian for building:",
+        currentId
+      );
+      continue;
+    }
+
+    // 5. 获取缓冲后的坐标用于绘制多边形
+    const coords = bufferPolygon(coordinates, 2);
+    if (!coords) {
+      console.error(
+        "Failed to buffer polygon coordinates for building:",
+        currentId
+      );
+      continue;
+    }
+
+    // 6. 创建新的实体
+    const newEntity = viewer.entities.add({
       name: `高亮建筑 ID: ${currentId}`,
-      position: centerTopCartesian, // 设置实体位置为中心点
+      position: centerTopCartesian,
       polygon: {
         hierarchy: Cesium.Cartesian3.fromDegreesArray(coords),
         extrudedHeight: buildingHeight,
-        height: 10, // 地面高度，通常为0或10等小值
+        height: 10,
         material: Cesium.Color.RED.withAlpha(0.5),
         outline: true,
         outlineColor: Cesium.Color.YELLOW,
@@ -140,10 +318,10 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
         classificationType: Cesium.ClassificationType.BOTH,
       },
       label: {
-        // text: `⚠️ 障碍物\n实际距离: ${nearest.actualDistance.toFixed(
-        //   1
-        // )}m\n高度: ${buildingHeight}m`,
-        text: `⚠️ 障碍物高度: ${buildingHeight}m`,
+        // 标签显示实际距离
+        text: `⚠️ 障碍物\n实际距离: ${item.actualDistance.toFixed(
+          1
+        )}m\n高度: ${buildingHeight}m`,
         font: "14px sans-serif",
         fillColor: Cesium.Color.WHITE,
         backgroundColor: Cesium.Color.RED,
@@ -159,40 +337,16 @@ export function updateHighlightedBuilding(nearest, viewer, dronePosition) {
         ),
       },
     });
-  } else {
-    // 复用已有实体，只更新属性
-    highlightedBuildingEntity.position = centerCartesian; // 更新实体位置为中心点
-    highlightedBuildingEntity.name = `高亮建筑 ID: ${currentId}`;
-    highlightedBuildingEntity.polygon.hierarchy =
-      Cesium.Cartesian3.fromDegreesArray(coords);
-    highlightedBuildingEntity.polygon.extrudedHeight = buildingHeight;
-    highlightedBuildingEntity.label.text = `⚠️ 障碍物高度: ${buildingHeight}m`;
-    highlightedBuildingEntity.show = true;
+
+    // 7. 存储新创建的实体和中心点
+    highlightedBuildingEntities.push(newEntity);
+    highlightedCenters.push(centerCartesian);
+
+    console.log(
+      `Highlighted building ${currentId} center (Cartesian):`,
+      centerCartesian
+    );
   }
 
-  // 6. 输出中心点坐标（可选，用于调试）
-  console.log(
-    `Highlighted building ${currentId} center (Cartesian):`,
-    centerCartesian
-  );
-  console.log(
-    `Center coordinates (Lon, Lat, Height): ${centerLonLat[0]}, ${centerLonLat[1]}, ${centerHeight}`
-  );
-
-  return centerCartesian;
-}
-
-export function clearHighlightedBuilding() {
-  if (highlightedBuildingEntity) {
-    highlightedBuildingEntity.show = false;
-    // 也可以选择隐藏整个实体
-    // highlightedBuildingEntity.show = false;
-  }
-  // 清除存储的中心点坐标
-  currentHighlightedCenter = null;
-}
-
-// 可选：添加一个函数来获取当前高亮建筑的中心点坐标
-export function getCurrentHighlightedCenter() {
-  return currentHighlightedCenter;
+  return highlightedCenters;
 }

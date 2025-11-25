@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Cesium 最近无人机检测示例</title>
+    <title>Cesium 冲突对象高亮示例</title>
     <script src="https://cdn.jsdelivr.net/npm/cesium@1.111.0/Build/Cesium/Cesium.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/cesium@1.111.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <style>
@@ -15,7 +15,17 @@
 <div id="cesiumContainer"></div>
 
 <script type="module">
-  import {calculateAndConnectNearestByPositions, randomOffset, clearEntities} from '../../src/drone_distance_utils.js';
+  // -----------------------------------------------------------
+  // 1. 引入新函数 (确保 drone_distance_utils.js 中已包含此函数)
+  import {
+    calculateAndConnectNearestByPositions, // <-- 新增
+    randomOffset, 
+    clearEntities
+  } from '../../src/drone_distance_utils.js';
+  // -----------------------------------------------------------
+  // 2. 引入新的封装方法
+  import { highlightNearestBuildingAndConnect } from '../../src/highlight_nearest_building.js'; // <-- 假设路径
+
   import {getNearstBuildingsWithinDistance} from '../../src/poligon_infos_intersect_distance.js';
     import {updateHighlightedBuilding} from '../../src/draw_buildings.js';
 
@@ -73,94 +83,127 @@
       const lon = Cesium.Math.toDegrees(carto.longitude);
       const lat = Cesium.Math.toDegrees(carto.latitude);
       const height = 150;
+      
+      // -----------------------------------------------------------
+      // 中心无人机经纬高数组
+      const centerLla = [lon, lat, height]; 
+      // -----------------------------------------------------------
 
-      // 中心无人机实体
+      // 中心无人机实体 (仍然需要 Cartesian3 来创建实体)
+      const centerDronePos = Cesium.Cartesian3.fromDegrees(lon, lat, height);
       const centerDrone = viewer.entities.add({
           name: "CenterDrone",
-          position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+          position: centerDronePos,
           model: {
               uri: "/models/four_drone.glb",
-              scale: 5,
+              scale: 20,
           }
       });
       droneEntities.push(centerDrone);
 
-      // 随机生成其他 10 个无人机实体
-      const otherPositions = [];
+      // -----------------------------------------------------------
+      // 随机生成其他 10 个无人机实体，并存储它们的 LLA 数组
+      const otherLlaPositions = []; // <-- 存储经纬高数组
       
       for (let i = 0; i < 10; i++) {
           const dLon = lon + randomOffset(0.001);
           const dLat = lat + randomOffset(0.001);
-          const pos = Cesium.Cartesian3.fromDegrees(dLon, dLat, height + Math.random() * 10);
-          otherPositions.push(pos);
+          const dHeight = height + Math.random() * 10;
+          
+          otherLlaPositions.push([dLon, dLat, dHeight]); // <-- 存储 LLA
 
+          const pos = Cesium.Cartesian3.fromDegrees(dLon, dLat, dHeight);
+          
           const drone = viewer.entities.add({
               name: `Drone-${i}`,
               position: pos,
               model: {
                   uri: "/models/four_drone.glb",
-                  scale: 5
+                  scale: 20
               }
           });
           droneEntities.push(drone);
       }
+      // -----------------------------------------------------------
 
-       const landPos = Cesium.Cartesian3.fromDegrees(lon + 0.005, lat + + 0.005, height + Math.random() * 10);
+       // -----------------------------------------------------------
+       // 替换第一个 calculateAndConnectNearestByPositions 调用
+       // 直接使用 LLA 数组计算最近无人机并连线
+       const nearestEntities = calculateAndConnectNearestByPositions({
+           centerLla: centerLla, // <-- 传入中心 LLA 数组
+           otherLlaPositions: otherLlaPositions, // <-- 传入其他无人机 LLA 数组
+           count: 3,
+           redThreshold: 50,
+           orangeThreshold: 120,
+           prefixText: "距离无人机",
+           viewer: viewer
+       });
+       // -----------------------------------------------------------
 
-      // 直接使用位置数组计算最近无人机并连线
-      const nearestEntities = calculateAndConnectNearestByPositions({
-          centerPos: Cesium.Cartesian3.fromDegrees(lon, lat, height),
-          otherPositions: otherPositions,
-          count: 3,
-          redThreshold: 50,
-          orangeThreshold: 120,
-          prefixText: "距离无人机",
-          viewer: viewer
-      });
+
       // 随机生成其他 1个起降场实体
-      const landingPositions = [];
-      landingPositions.push(landPos)
-      const dronePoint =  Cesium.Cartesian3.fromDegrees(lon, lat, height);
+      // -----------------------------------------------------------
+      const landLon = lon + 0.005;
+      const landLat = lat + 0.005;
+      const landHeight = height + Math.random() * 10;
 
-       const detectionRadius = 200; // 设置检测半径
-      // 直接使用位置数组计算最近无人机并连线
+      const landingLla = [landLon, landLat, landHeight]; // <-- LLA 数组
+      const landingLlaPositions = [landingLla]; // <-- LLA 数组的数组
+      // -----------------------------------------------------------
+
+      const landPos = Cesium.Cartesian3.fromDegrees(landLon, landLat, landHeight); // 用于创建实体
+      const dronePoint = centerDronePos; // 中心点 Cartesian3 
+
+       // -----------------------------------------------------------
+       // 替换第二个 calculateAndConnectNearestByPositions 调用
+       // 直接使用 LLA 数组计算最近无人机并连线
       const landingEntities = calculateAndConnectNearestByPositions({
-          centerPos: dronePoint,
-          otherPositions: landingPositions,
+          centerLla: centerLla, // <-- 传入中心 LLA 数组
+          otherLlaPositions: landingLlaPositions, // <-- 传入起降场 LLA 数组
           count: 1,
           redThreshold: 50,
           orangeThreshold: 120,
           prefixText: "距离起降场",
           viewer: viewer
       });
+      // -----------------------------------------------------------
+
+      // 创建起降场实体
+      const landingDrone = viewer.entities.add({
+          name: "LandingPad",
+          position: landPos,
+          point: {
+              pixelSize: 10,
+              color: Cesium.Color.BLUE
+          }
+      });
+      droneEntities.push(landingDrone);
+
 
       lineEntities.push(...nearestEntities);
       lineEntities.push(...landingEntities);
 
       
-       const nearest =  await getNearstBuildingsWithinDistance(dronePoint, detectionRadius)
+    // 【核心修改】替换原有的建筑物高亮和连线逻辑，调用新封装的方法
+    // 替换原有的建筑物高亮和连线逻辑，调用新封装的方法
+    const detectionRadius = 200; // 设置检测半径
 
-       const buildingsCenter = updateHighlightedBuilding(nearest, viewer,dronePoint);
+    const buildingsEntities = await highlightNearestBuildingAndConnect({
+        // centerPoint: centerDronePos, // <--- 这个参数现在被移除，不需要传入
+        centerLla: centerLla,        // 传入 [lon, lat, height] 数组
+        detectionRadius: detectionRadius,
+        count: 3, 
+        redThreshold: 50,
+        orangeThreshold: 120,
+        prefixText: `距离建筑物`,
+        viewer: viewer
+    });
+    // -----------------------------------------------------------
 
-       // 获取建筑物实体
-      const buildingPositions = [];
-      buildingPositions.push(buildingsCenter)
-       // 直接使用位置数组计算最近无人机并连线
-      const buildingsEntities = calculateAndConnectNearestByPositions({
-          centerPos: dronePoint,
-          otherPositions: buildingPositions,
-          count: 1,
-          redThreshold: 50,
-          orangeThreshold: 120,
-          prefixText: `距离建筑物`,
-          viewer: viewer
-      });
 
-      lineEntities.push(...buildingsEntities);
+    lineEntities.push(...buildingsEntities);
 
 
       viewer.flyTo(centerDrone);
   });
 </script>
-</body>
-</html>

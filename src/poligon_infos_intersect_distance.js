@@ -112,6 +112,79 @@ export async function getBuildingsWithinDistance(point, distanceInMeters) {
   return result;
 }
 
+/**
+ * 在 Cesium 场景中查找指定点位附近，距离最近的 N 个建筑物信息。
+ *
+ * @param {Cesium.Cartesian3} pointCesium - 中心点位的 Cartesian3 坐标。
+ * @param {number} distanceInMeters - 初始检测半径 (米)，用于调用 getBuildingsWithinDistance。
+ * @param {number} count - 需要返回的最近建筑物的数量。
+ * @returns {Promise<Array<Object> | undefined>} - 返回包含 'count' 个最近建筑物信息的数组，
+ * 每个对象包含 { polygon, distanceInMeters, actualDistance }，
+ * 如果没有找到任何建筑物则返回 undefined。
+ */
+export async function getNearstMultipleBuildingsWithinDistance(
+  pointCesium,
+  distanceInMeters,
+  count // 新增参数
+) {
+  const lonLatHeight = Cesium.Cartographic.fromCartesian(pointCesium);
+  const lon = Cesium.Math.toDegrees(lonLatHeight.longitude);
+  const lat = Cesium.Math.toDegrees(lonLatHeight.latitude);
+  const droneHeight = lonLatHeight.height;
+
+  const point = turf.point([lon, lat]);
+
+  // 1. 获取检测半径内的所有建筑物
+  const allBuildings = await getBuildingsWithinDistance(
+    point,
+    distanceInMeters
+  );
+
+  if (allBuildings.length === 0) {
+    // 兼容你的旧函数返回 undefined 的逻辑，这里返回 undefined
+    return undefined;
+  }
+
+  // 2. 计算每个建筑物的实际距离并存储
+  const buildingsWithDistance = allBuildings.map((item) => {
+    const buildingHeight = item.polygon.properties.height;
+    const horizontalDistance = item.distanceInMeters;
+
+    let actualDistance;
+
+    // 计算实际距离的逻辑保持不变
+    if (horizontalDistance <= 0) {
+      // 无人机在建筑投影范围内
+      if (droneHeight > buildingHeight) {
+        actualDistance = droneHeight - buildingHeight; // 高于建筑，垂直差
+      } else {
+        actualDistance = 0; // 在建筑物里面或低于建筑顶
+      }
+    } else {
+      // 无人机不在建筑投影范围
+      if (droneHeight <= buildingHeight) {
+        actualDistance = horizontalDistance; // 水平距离
+      } else {
+        actualDistance = Math.sqrt(
+          Math.pow(droneHeight - buildingHeight, 2) +
+            Math.pow(horizontalDistance, 2)
+        );
+      }
+    }
+
+    // 返回带有实际距离的完整对象
+    return { ...item, actualDistance };
+  });
+
+  // 3. 按实际距离升序排序
+  buildingsWithDistance.sort((a, b) => a.actualDistance - b.actualDistance);
+
+  // 4. 返回前 count 个建筑物
+  // 使用 slice(0, count) 确保只返回指定数量的元素。
+  // 如果建筑物总数小于 count，则返回所有建筑物。
+  return buildingsWithDistance.slice(0, count);
+}
+
 export async function getNearstBuildingsWithinDistance(
   pointCesium,
   distanceInMeters
