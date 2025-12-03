@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    #cesiumContainer {
+      width: 100%;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+   
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        const viewer = new Cesium.Viewer("cesiumContainer", {
+            shouldDebug: true
+        });
+
+        // 加载 3D Tileset
+        const tileset = viewer.scene.primitives.add(
+            await Cesium.Cesium3DTileset.fromUrl(
+                "https://gl.hangzhoudk.com/modelfile/tileset.json", {
+                    debugShowBoundingVolume: false,
+                })
+        );
+        
+        // ----------------------------------------------------
+        // 💡 1. 定义要裁剪的地理区域（经纬度范围）
+        // ----------------------------------------------------
+        const minLon = 119.9384401375432;
+        const maxLon = 120.03013724921674;
+        const minLat = 30.261852568883025;
+        const maxLat = 30.31701791606819;
+        const maxAltitude = 200.0; // 裁剪的最大高度（米）
+
+
+
+        // ----------------------------------------------------
+        // 💡 2. 计算中心点和裁剪平面的本地坐标系
+        // ----------------------------------------------------
+        const centerLon = (minLon + maxLon) / 2.0;
+        const centerLat = (minLat + maxLat) / 2.0;
+        
+        // 计算中心点的笛卡尔坐标
+        const centerCartesian = Cesium.Cartesian3.fromDegrees(centerLon, centerLat);
+        
+        // 创建 East-North-Up (ENU) 转换矩阵作为裁剪平面的 modelMatrix
+        // Clipping Planes 将在这个本地坐标系中定义
+        const modelMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(centerCartesian);
+        const inverseModelMatrix = Cesium.Matrix4.inverse(modelMatrix, new Cesium.Matrix4());
+
+        // ----------------------------------------------------
+        // 💡 3. 计算边界点在本地 ENU 坐标系中的位置 (X, Y)
+        // ----------------------------------------------------
+        
+        // 北边界点 (maxLat) 的世界笛卡尔坐标
+        const northBoundaryCartesian = Cesium.Cartesian3.fromDegrees(centerLon, maxLat);
+        // 将其转换到本地 ENU 坐标系
+        const northLocal = Cesium.Matrix4.multiplyByPoint(inverseModelMatrix, northBoundaryCartesian, new Cesium.Cartesian3());
+        const Y_max = northLocal.y; // Y轴代表北方向
+
+        // 东边界点 (maxLon) 的世界笛卡尔坐标
+        const eastBoundaryCartesian = Cesium.Cartesian3.fromDegrees(maxLon, centerLat);
+        // 将其转换到本地 ENU 坐标系
+        const eastLocal = Cesium.Matrix4.multiplyByPoint(inverseModelMatrix, eastBoundaryCartesian, new Cesium.Cartesian3());
+        const X_max = eastLocal.x; // X轴代表东方向
+        
+        // ----------------------------------------------------
+        // 💡 4. 定义 6 个裁剪平面（围成一个盒子）
+        // ----------------------------------------------------
+        const planes = [
+            // 北平面 (Normal: +Y / North, 裁剪 y > Y_max 的区域)
+            // 平面方程: 1*y + D = 0. 平面在 y = Y_max，所以 D = -Y_max
+            new Cesium.ClippingPlane(new Cesium.Cartesian3(0.0, 1.0, 0.0), -Y_max), 
+            
+            // 南平面 (Normal: -Y / South, 裁剪 y < -Y_max 的区域)
+            // 平面在 y = -Y_max (因为Y_max是中心点到边界的距离)，所以 D = Y_max
+            new Cesium.ClippingPlane(new Cesium.Cartesian3(0.0, -1.0, 0.0), -Y_max), 
+
+            // 东平面 (Normal: +X / East, 裁剪 x > X_max 的区域)
+            // 平面方程: 1*x + D = 0. 平面在 x = X_max，所以 D = -X_max
+            new Cesium.ClippingPlane(new Cesium.Cartesian3(1.0, 0.0, 0.0), -X_max), 
+
+            // 西平面 (Normal: -X / West, 裁剪 x < -X_max 的区域)
+            // 平面在 x = -X_max，所以 D = X_max
+            new Cesium.ClippingPlane(new Cesium.Cartesian3(-1.0, 0.0, 0.0), -X_max), 
+            
+            // 顶平面 (Normal: +Z / Up, 裁剪 z > maxAltitude 的区域)
+            // Z=0 是中心点，我们假设地面高度为0，裁剪到 maxAltitude
+            new Cesium.ClippingPlane(new Cesium.Cartesian3(0.0, 0.0, 1.0), -maxAltitude),
+            
+            // 底平面 (Normal: -Z / Down, 裁剪 z < 0 的区域)
+            new Cesium.ClippingPlane(new Cesium.Cartesian3(0.0, 0.0, -1.0), 0.0), 
+        ];
+
+        // ----------------------------------------------------
+        // 💡 5. 创建 ClippingPlaneCollection 并应用到 Tileset
+        // ----------------------------------------------------
+        const clippingPlanes = new Cesium.ClippingPlaneCollection({
+            planes: planes,
+            // 关键：应用本地坐标系转换矩阵
+            modelMatrix: modelMatrix, 
+            edgeWidth: 2.0,
+            edgeColor: Cesium.Color.fromCssColorString('#00FFFF'), // 青色边界
+            enabled: true,
+            // 关键：设置为 false，表示只保留所有平面内侧的区域 (即盒子内部)
+            unionClippingRegions: false 
+        });
+
+        tileset.clippingPlanes = clippingPlanes;
+
+        // ----------------------------------------------------
+        // 💡 6. 视点定位到裁剪区域
+        // ----------------------------------------------------
+        viewer.camera.flyTo({
+            destination: centerCartesian,
+            offset: new Cesium.HeadingPitchRange(
+                Cesium.Math.toRadians(0.0), // Heading
+                Cesium.Math.toRadians(-45.0), // Pitch
+                1000.0 // Range (距离中心的距离)
+            )
+        });
+        
+    
+  </script>
+</body>
+
+</html>

@@ -26,6 +26,7 @@ async function init() {
       "https://gl.hangzhoudk.com/modelfile/tileset.json",
       {
         debugShowBoundingVolume: false,
+        maximumScreenSpaceError: 512,
       }
     )
   );

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      shouldDebug: true,
+      timeline: true,
+      animation: true
+    });
+
+    (async function () {
+      // 1️⃣ 加载 3D Tileset
+      const tileset = viewer.scene.primitives.add(await Cesium.Cesium3DTileset.fromUrl(
+        "https://gl.hangzhoudk.com/modelfile/tileset.json",
+        { debugShowBoundingVolume: false }
+      ));
+
+      tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+        console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+      });
+
+      // 确保 Tileset 加载完成后再定位和添加无人机
+      await tileset.readyPromise;
+
+      // 获取 Tileset 中心作为无人机初始位置
+      const center = tileset.boundingSphere.center;
+      const centerCarto = Cesium.Cartographic.fromCartesian(center);
+      const startLon = Cesium.Math.toDegrees(centerCarto.longitude);
+      const startLat = Cesium.Math.toDegrees(centerCarto.latitude);
+      const startHeight = centerCarto.height + 50;
+
+      // 定位相机到 Tileset
+      viewer.zoomTo(tileset);
+
+      // 2️⃣ 创建无人机轨迹
+      const dronePosition = new Cesium.SampledPositionProperty();
+
+      const droneEntity = viewer.entities.add({
+        position: dronePosition,
+        point: { pixelSize: 12, color: Cesium.Color.RED },
+        path: {
+          resolution: 1,
+          width: 5,
+          leadTime: 1,       // 线条延伸到未来 1 秒
+          trailTime: 30,     // 拖尾持续 30 秒
+          material: new Cesium.PolylineGlowMaterialProperty({
+            glowPower: 0.3,
+            color: Cesium.Color.CYAN
+          })
+        }
+      });
+
+      // 3️⃣ 模拟无人机飞行轨迹
+      const startTime = Cesium.JulianDate.now();
+      const clock = viewer.clock;
+      clock.startTime = startTime.clone();
+      clock.currentTime = startTime.clone();
+      clock.stopTime = Cesium.JulianDate.addSeconds(startTime, 120, new Cesium.JulianDate());
+      clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+      clock.multiplier = 1; // 时间加速倍数
+      clock.shouldAnimate = true; // ← 关键：启动时钟
+
+
+      viewer.clock.onTick.addEventListener(() => {
+        const t = Cesium.JulianDate.secondsDifference(clock.currentTime, startTime);
+        // 无人机缓慢移动，始终在 Tileset 中心附近
+        const lon = startLon + 0.0001 * t;
+        const lat = startLat + 0.0001 * Math.sin(t / 10);
+        const height = startHeight + 10 * Math.cos(t / 5);
+        dronePosition.addSample(clock.currentTime, Cesium.Cartesian3.fromDegrees(lon, lat, height));
+      });
+    })();
+  </script>
+</body>
+
+</html>

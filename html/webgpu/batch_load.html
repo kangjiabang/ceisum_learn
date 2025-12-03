@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Orillusion 批量加载 GLB 示例（修复版）</title>
+  <style>
+    body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+
+<script src="https://unpkg.com/@orillusion/core/dist/orillusion.umd.js"></script>
+
+<script type="module">
+const { 
+    Engine3D, Scene3D, Object3D, Camera3D, HoverCameraController,
+    View3D, Color, Vector3
+} = Orillusion;
+
+async function main() {
+
+    // 初始化
+    await Engine3D.init();
+
+    // 创建场景
+    const scene = new Scene3D();
+
+    // Camera 载体  
+    const cameraObj = new Object3D();
+    scene.addChild(cameraObj);
+
+    // Camera
+    const camera = cameraObj.addComponent(Camera3D);
+    camera.perspective(60, window.innerWidth / window.innerHeight, 0.1, 50000);
+
+    // 相机控制器
+    const controller = cameraObj.addComponent(HoverCameraController);
+    controller.setCamera(45, -30, 300);
+
+    // 创建 View（‼️必须，否则渲染器与相机为空）
+    const view = new View3D();
+    view.scene = scene;
+    view.camera = camera;
+
+    Engine3D.startRenderView(view); // 正确写法
+
+    // 批量实体 Map
+    const entitiesMap = new Map();
+
+    /**
+     * 批量加载 GLB
+     */
+    async function loadModels(positions) {
+        for (const pos of positions) {
+            const obj = new Object3D();
+            obj.name = pos.name || `model-${pos.id}`;
+
+            obj.localPosition.set(pos.longitude, pos.height, pos.latitude);
+            const s = pos.scale ?? 1;
+            obj.localScale.set(s, s, s);
+
+            // 加载 GLB
+            const gltf = await Engine3D.res.loadGltf(pos.uri);
+
+            // 找到 GLB 的根节点
+            let root = null;
+
+            if (gltf.scene) root = gltf.scene;
+            else if (gltf.defaultSceneRoot) root = gltf.defaultSceneRoot;
+            else if (Array.isArray(gltf) && gltf.length > 0) root = gltf[0];
+            else {
+                console.warn("未知 GLTF 格式：", gltf);
+                continue;
+            }
+
+            obj.addChild(root);
+
+            scene.addChild(obj);
+            entitiesMap.set(pos.id, obj);
+        }
+    }
+
+    /**
+     * 高亮闪烁
+     */
+    function highlightModel(id, color = new Color(1,0,0,1)) {
+        const obj = entitiesMap.get(id);
+        if (!obj) return;
+
+        const meshRenders = obj.getComponentsInChildren(Orillusion.MeshRenderer);
+        if (!meshRenders.length) return;
+
+        let t = 0;
+
+        function animate() {
+            t += 0.03;
+            const a = (Math.sin(t*10) + 1) / 2;
+
+            meshRenders.forEach(mr => {
+                mr.materials?.forEach(mat => {
+                    mat.emissiveColor = new Color(color.r, color.g, color.b, a);
+                });
+            });
+
+            requestAnimationFrame(animate);
+        }
+        animate();
+    }
+
+    /**
+     * 清除高亮
+     */
+    function clearHighlight(id) {
+        const obj = entitiesMap.get(id);
+        if (!obj) return;
+
+        const meshRenders = obj.getComponentsInChildren(Orillusion.MeshRenderer);
+        meshRenders.forEach(mr => {
+            mr.materials?.forEach(mat => {
+                mat.emissiveColor = new Color(0,0,0,0);
+            });
+        });
+    }
+
+    // 示例数据
+    const positions = [
+        {id: 1, name: "无人机A", uri: "./four_drone.glb", longitude: 0, latitude: 0, height: 0, scale: 5},
+        {id: 2, name: "无人机B", uri: "./four_drone.glb", longitude: 50, latitude: 0, height: 0, scale: 5},
+        {id: 3, name: "无人机C", uri: "./four_drone.glb", longitude: -50, latitude: 0, height: 0, scale: 5},
+    ];
+
+    await loadModels(positions);
+
+    // 测试闪烁
+    setTimeout(() => highlightModel(1, new Color(1,0,0,1)), 2000);
+    setTimeout(() => clearHighlight(1), 8000);
+}
+
+main();
+</script>
+</body>
+</html>

@@ -2,20 +2,30 @@
 
 import * as turf from "@turf/turf";
 import parseBuildingsFile from "./parse_buildings.js";
-
+import RBush from "rbush";
 // 全局缓存空间索引和建筑物数据
 let tree = null;
 let polygons = [];
 
 // 初始化空间索引（只执行一次）
+/**
+ * 初始化空间索引（只执行一次）
+ * 使用 RBush R-tree 数据结构构建空间索引以提高查询性能
+ */
 async function initSpatialIndex() {
   if (tree) return; // 已初始化
 
-  const { default: RBush } = await import("rbush");
-
   // 解析建筑物数据
-  polygons = await parseBuildingsFile("/src/buildings_output.txt");
-  console.log(`加载了 ${polygons.length} 个建筑物`);
+  try {
+    polygons = await parseBuildingsFile("/src/buildings_output.txt");
+    console.log(`加载了 ${polygons.length} 个建筑物`);
+  } catch (error) {
+    console.warn(
+      "⚠️ 建筑物数据文件不存在或加载失败，使用空数据集:",
+      error.message
+    );
+    polygons = [];
+  }
 
   // 构建空间索引
   const indexedItems = polygons.map((polygon, index) => {
@@ -33,22 +43,6 @@ async function initSpatialIndex() {
   tree = new RBush();
   tree.load(indexedItems);
 }
-
-//计算点到多边形的距离（简化版）
-// function getDistanceToPoint(point, polygon) {
-//     try {
-//         const centroid = turf.centroid(polygon);
-//         return turf.distance(point, centroid, { units: 'kilometers' });
-//     } catch (error) {
-//         try {
-//             const bbox = turf.bbox(polygon);
-//             const bboxCenter = turf.point([(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]);
-//             return turf.distance(point, bboxCenter, { units: 'kilometers' });
-//         } catch (error2) {
-//             return Infinity;
-//         }
-//     }
-// }
 
 function getDistanceToPoint(point, polygon) {
   try {
@@ -185,7 +179,7 @@ export async function getNearstMultipleBuildingsWithinDistance(
   return buildingsWithDistance.slice(0, count);
 }
 
-export async function getNearstBuildingsWithinDistance(
+export async function getNearstBuildingsWithinDistanceWithPoint(
   pointCesium,
   distanceInMeters
 ) {
@@ -195,6 +189,74 @@ export async function getNearstBuildingsWithinDistance(
   const droneHeight = lonLatHeight.height;
 
   const point = turf.point([lon, lat]);
+  const result = await getBuildingsWithinDistance(point, distanceInMeters);
+
+  if (result.length === 0) {
+    return;
+  }
+  let nearest = null;
+  let minActualDistance = Infinity;
+
+  for (const item of result) {
+    const buildingHeight = item.polygon.properties.height;
+    const horizontalDistance = item.distanceInMeters;
+
+    // 计算实际距离
+    let actualDistance;
+    if (horizontalDistance <= 0) {
+      // 无人机在建筑投影范围内
+      if (droneHeight > buildingHeight) {
+        actualDistance = droneHeight - buildingHeight; // 高于建筑，垂直差
+      } else {
+        actualDistance = 0; // 在建筑物里面或低于建筑顶
+      }
+    } else {
+      // 无人机不在建筑投影范围
+      if (droneHeight <= buildingHeight) {
+        actualDistance = horizontalDistance; // 水平距离
+      } else {
+        actualDistance = Math.sqrt(
+          Math.pow(droneHeight - buildingHeight, 2) +
+            Math.pow(horizontalDistance, 2)
+        );
+      }
+    }
+
+    // 记录最小距离
+    if (actualDistance < minActualDistance) {
+      minActualDistance = actualDistance;
+      nearest = { ...item, actualDistance };
+    }
+  }
+  return nearest;
+}
+
+/**
+ * 查找指定距离内最近的建筑物（考虑3D距离）
+ * @param {Array<number>} coordinates - 坐标数组 [longitude, latitude, height]，表示无人机位置
+ * @param {number} distanceInMeters - 查询半径（米）
+ * @returns {Promise<Object|undefined>} 返回最近的建筑物对象，包含实际3D距离
+ */
+export async function getNearstBuildingsWithinDistance(
+  coordinates,
+  distanceInMeters
+) {
+  // 从坐标数组中提取经纬度和高度
+  const [longitude, latitude, height] = coordinates;
+  const droneHeight = height;
+
+  // 创建 GeoJSON Feature 对象用于查询
+  const point = {
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: [longitude, latitude],
+    },
+    properties: {
+      height: droneHeight,
+    },
+  };
+
   const result = await getBuildingsWithinDistance(point, distanceInMeters);
 
   if (result.length === 0) {

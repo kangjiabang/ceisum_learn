@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Cesium + Orillusion Demo (Synchronized Box)</title>
+
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Orillusion Canvas 叠加在 Cesium 上层 */
+        #orillusionCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            /* 保持 pointer-events: none; 才能点击到 Cesium 的地球 */
+            pointer-events: none; 
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="cesiumContainer"></div>
+
+    <canvas id="orillusionCanvas"></canvas>
+
+    <script src="https://unpkg.com/@orillusion/core/dist/orillusion.umd.js"></script>
+
+
+    <script type="module">
+        /**************************************************************
+         * 初始化 Cesium 地球
+         **************************************************************/
+        Cesium.Ion.defaultAccessToken =
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+        const viewer = new Cesium.Viewer("cesiumContainer", {
+            shouldDebug: true,
+            terrain: Cesium.Terrain.fromWorldTerrain()
+        });
+
+        // 加载 3D Tiles
+        const tileset = viewer.scene.primitives.add(
+            await Cesium.Cesium3DTileset.fromUrl(
+                "https://gl.hangzhoudk.com/modelfile/tileset.json"
+            )
+        );
+
+        // 缩放到 3D Tileset
+        viewer.zoomTo(tileset);
+        
+        // ** Cesium Box 的地理位置 (以上海陆家嘴为例) **
+        const lon = 121.49969; // 经度
+        const lat = 31.23932;  // 纬度
+        const height = 100.0;  // 高度 (距离地面 100 米)
+
+        const boxPosition = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+        
+        // 创建一个用于放置 Box 的局部坐标系 (Local Frame)
+        // 这个矩阵负责将 Box 的局部坐标转换到 Cesium 的世界坐标
+        const localFrame = Cesium.Transforms.eastNorthUpToFixedFrame(
+            boxPosition
+        );
+
+        /**************************************************************
+         * 初始化 Orillusion
+         **************************************************************/
+        let orillusionCamera = null;
+        let orillusionView = null;
+
+        const {
+            Engine3D,
+            Scene3D,
+            Camera3D,
+            Object3D,
+            DirectLight,
+            AtmosphericComponent,
+            MeshRenderer,
+            BoxGeometry,
+            LitMaterial,
+            Color,
+            View3D,
+            Vector3,
+            Matrix4 // 引入 Matrix4 用于设置视图矩阵
+        } = window.Orillusion;
+
+        async function initOrillusion() {
+            const canvas = document.getElementById("orillusionCanvas");
+
+            /******** 初始化 WebGPU Orillusion 引擎 ********/
+            await Engine3D.init({
+                canvasConfig: {
+                    canvas: canvas,
+                    devicePixelRatio: window.devicePixelRatio,
+                }
+            });
+
+            const scene = new Scene3D();
+
+            // 天空大气
+            scene.addComponent(AtmosphericComponent);
+
+            // 光源
+            const lightObj = new Object3D();
+            const light = lightObj.addComponent(DirectLight);
+            light.intensity = 5;
+            lightObj.rotationX = 135;
+            lightObj.rotationY = 45;
+            lightObj.rotationZ = 0;
+            scene.addChild(lightObj);
+
+            // 相机 (在同步模式下，我们不需要设置位置和 lookAt)
+            const camNode = new Object3D();
+            orillusionCamera = camNode.addComponent(Camera3D);
+            
+            // 使用 Cesium 的 FOV 来计算 Orillusion 的投影矩阵
+            const fov = Cesium.Math.toDegrees(viewer.camera.frustum.fov);
+            orillusionCamera.perspective(fov, window.innerWidth / window.innerHeight, 1, 200000);
+            
+            scene.addChild(camNode);
+
+
+            // ---- 创建一个 Orillusion 的 Box 盒子 ----
+            const box = new Object3D();
+            const mesh = box.addComponent(MeshRenderer);
+
+            // Box 的大小要相对调整，使其在 Cesium 场景中可见
+            // BoxGeometry (宽度, 高度, 深度)
+            mesh.geometry = new BoxGeometry(100, 100, 100); 
+
+            // 使用 LitMaterial 并设置颜色
+            const mat = new LitMaterial();
+            mat.baseColor = new Color(0, 0.5, 1, 1); // 蓝色
+            mesh.material = mat;
+
+            // Box 放在本地坐标系的原点 (0, 0, 0)，
+            // 因为它的世界位置由下面的同步逻辑决定。
+            box.transform.x = 0;
+            box.transform.y = 0;
+            box.transform.z = 0;
+
+            scene.addChild(box);
+
+            /************** 渲染 View **************/
+            const view = new View3D();
+            view.scene = scene;
+            view.camera = orillusionCamera;
+            orillusionView = view; // 保存引用用于更新
+            
+            Engine3D.startRenderView(view);
+            
+            // ** 第一次同步相机，确保 Box 在初始视图中可见 **
+            syncCamera();
+        }
+
+        /**
+         * 将 Cesium 的相机状态同步到 Orillusion 相机
+         */
+        function syncCamera() {
+            if (!orillusionCamera) return;
+
+            const scene = viewer.scene;
+            
+            // 1. 获取 Cesium 的投影矩阵 (Projection Matrix)
+            const cesiumProjectionMatrix = scene.camera.frustum.projectionMatrix;
+            
+            // 2. 获取 Cesium 的视图矩阵 (View Matrix)
+            // View Matrix = Cesium Camera World Matrix 的逆矩阵
+            const cesiumViewMatrix = scene.camera.viewMatrix;
+            
+            // 3. 计算 Orillusion Model-View Matrix (M_orl)
+            // M_orl = M_cesium_view * M_local_frame
+            
+            // Cesium 矩阵（列主序）
+            const c_view = cesiumViewMatrix; // Cesium View Matrix
+            const c_local = localFrame;      // Local Frame Matrix
+            
+            // 矩阵乘法: Orillusion View Matrix = Cesium View Matrix * Local Frame Matrix
+            const orillusionViewMatrix = Cesium.Matrix4.multiply(c_view, c_local, new Cesium.Matrix4());
+            
+            // 4. 将 Cesium 的 View Matrix 赋值给 Orillusion 相机
+            // Orillusion 使用行主序 (Row-major)，Cesium 使用列主序 (Column-major)
+            // Cesium 的 Matrix4 属性 `values` 是列主序，直接转换给 Orillusion 的 View Matrix
+            
+            const orl_view_matrix = new Matrix4();
+            // Cesium Matrix4.values 是包含 16 个元素的数组
+            orl_view_matrix.elements.set(orillusionViewMatrix.values);
+            
+            // 设置 Orillusion 相机的视图矩阵
+            orillusionCamera.viewMatrix = orl_view_matrix;
+            
+            // 5. 设置 Orillusion 的投影矩阵
+            // Cesium 的 projectionMatrix.values 也是列主序
+            const orl_proj_matrix = new Matrix4();
+            orl_proj_matrix.elements.set(cesiumProjectionMatrix.values);
+            
+            // 设置 Orillusion 相机的投影矩阵
+            orillusionCamera.projMatrix = orl_proj_matrix;
+            
+            // 强制 Orillusion 重新渲染
+            Engine3D.render(orillusionView);
+        }
+
+        // 初始化 Orillusion 引擎
+        initOrillusion();
+
+        // ** 监听 Cesium 相机移动事件，实现实时同步 **
+        // 使用 postRender 事件可以实现最流畅的同步，但在 Orillusion 中使用 Engine3D.render() 可能会消耗性能。
+        // 为了平衡性能，我们使用 Cesium 的 scene.postRender (每帧调用) 
+        viewer.scene.postRender.addEventListener(syncCamera);
+
+        // 窗口大小变化时，同步 Canvas 大小和 Orillusion 投影矩阵
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            // 调整 Orillusion Canvas 大小
+            const canvas = document.getElementById("orillusionCanvas");
+            canvas.width = width;
+            canvas.height = height;
+            
+            // 更新 Cesium 的 FOV 和 Aspect Ratio
+            const fov = Cesium.Math.toDegrees(viewer.camera.frustum.fov);
+            if (orillusionCamera) {
+                orillusionCamera.perspective(fov, width / height, 1, 200000);
+            }
+            
+            // 立即同步更新视图
+            syncCamera();
+        });
+
+    </script>
+</body>
+
+</html>

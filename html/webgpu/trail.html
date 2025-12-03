@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cesium + Three.js 流光拖尾 (ES Module)</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+
+<style>
+  html, body, #cesiumContainer {
+    width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+  }
+  canvas { display:block; position:absolute; top:0; left:0; }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/controls/OrbitControls.js';
+
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+const viewer = new Cesium.Viewer('cesiumContainer', {
+    shouldDebug: true,
+    timeline: true,
+    animation: true
+});
+
+(async function(){
+    const tileset = viewer.scene.primitives.add(await Cesium.Cesium3DTileset.fromUrl(
+        "https://gl.hangzhoudk.com/modelfile/tileset.json",
+        { debugShowBoundingVolume: false }
+    ));
+    await tileset.readyPromise;
+
+    const center = tileset.boundingSphere.center;
+    const centerCarto = Cesium.Cartographic.fromCartesian(center);
+    const startLon = Cesium.Math.toDegrees(centerCarto.longitude);
+    const startLat = Cesium.Math.toDegrees(centerCarto.latitude);
+    const startHeight = centerCarto.height + 50;
+    viewer.zoomTo(tileset);
+
+    // Three.js
+    const threeScene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 10000);
+    camera.position.set(0, 100, 300);
+
+    const renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+
+    // 无人机点
+    const droneGeom = new THREE.SphereGeometry(2, 16, 16);
+    const droneMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const drone = new THREE.Mesh(droneGeom, droneMat);
+    threeScene.add(drone);
+
+    // 拖尾
+    const maxTrailLength = 100;
+    let trailPositions = [];
+    const trailGeom = new THREE.BufferGeometry();
+    const trailPositionsArray = new Float32Array(maxTrailLength*3);
+    trailGeom.setAttribute('position', new THREE.BufferAttribute(trailPositionsArray, 3));
+
+    const colorsArray = new Float32Array(maxTrailLength*3);
+    trailGeom.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
+    const trailMat = new THREE.LineBasicMaterial({ vertexColors:true, transparent:true, opacity:0.8 });
+    const trailLine = new THREE.Line(trailGeom, trailMat);
+    threeScene.add(trailLine);
+
+    window.addEventListener('resize', ()=>{
+        camera.aspect = window.innerWidth/window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 模拟无人机轨迹
+    let t = 0;
+    function animate(){
+        requestAnimationFrame(animate);
+        controls.update();
+
+        t += 0.1;
+        const lon = startLon + 0.0001 * t;
+        const lat = startLat + 0.0001 * Math.sin(t/10);
+        const height = startHeight + 10 * Math.cos(t/5);
+
+        const x = (lon-startLon)*100000;
+        const z = (lat-startLat)*100000;
+        const y = height;
+        drone.position.set(x,y,z);
+
+        trailPositions.push(drone.position.clone());
+        if(trailPositions.length>maxTrailLength) trailPositions.shift();
+
+        const positions = trailLine.geometry.attributes.position.array;
+        const colors = trailLine.geometry.attributes.color.array;
+        for(let i=0;i<trailPositions.length;i++){
+            const p = trailPositions[i];
+            positions[i*3] = p.x;
+            positions[i*3+1] = p.y;
+            positions[i*3+2] = p.z;
+
+            const alpha = i/trailPositions.length;
+            colors[i*3] = 0;
+            colors[i*3+1] = 1*alpha;
+            colors[i*3+2] = 1*alpha;
+        }
+        trailLine.geometry.setDrawRange(0, trailPositions.length);
+        trailLine.geometry.attributes.position.needsUpdate = true;
+        trailLine.geometry.attributes.color.needsUpdate = true;
+
+        renderer.render(threeScene, camera);
+    }
+    animate();
+})();
+</script>
+</body>
+</html>

@@ -104,7 +104,7 @@ export async function extractBuildingsByRayCasting(viewer, options = {}) {
       }
 
       //可视化射线（可选，调试用）
-      showRayPoint(viewer, hitResult, position, endPoint);
+      // showRayPoint(viewer, hitResult, position, endPoint);
 
       if (hitResult) {
         const carto = Cesium.Cartographic.fromCartesian(hitResult.position);

@@ -87,13 +87,13 @@
         //viewer.scene.fxaa = true;
         //viewer.scene.highDynamicRange = false;
 
-        const tileset = viewer.scene.primitives.add(
-          await Cesium.Cesium3DTileset.fromUrl(
-            "https://gl.hangzhoudk.com/modelfile/tileset.json",
-            { debugShowBoundingVolume: false }
-          )
-        );
-        viewer.zoomTo(tileset);
+        // const tileset = viewer.scene.primitives.add(
+        //   await Cesium.Cesium3DTileset.fromUrl(
+        //     "https://gl.hangzhoudk.com/modelfile/tileset.json",
+        //     { debugShowBoundingVolume: false }
+        //   )
+        // );
+        // viewer.zoomTo(tileset);
 
         hideLoading();
 
@@ -219,8 +219,8 @@
           attributes: {
             color: Cesium.ColorGeometryInstanceAttribute.fromColor(
               // 使用浅灰白色：Gainsboro 或自定义灰白
-              //Cesium.Color.GAINSBORO.withAlpha(0.9) // #DCDCDC，偏灰的“白”
-              Cesium.Color.BLUE.withAlpha(0.7) ,// #DCDCDC，偏灰的“白”
+              Cesium.Color.GAINSBORO.withAlpha(0.9) // #DCDCDC，偏灰的“白”
+              //Cesium.Color.WHITE.withAlpha(1) ,// #DCDCDC，偏灰的“白”
               //material: Cesium.Color.BLUE.withAlpha(0.7), // 蓝色半透明
               // 或使用：new Cesium.Color(0.9, 0.9, 0.92, 0.8) // R:230, G:230, B:234
             )
@@ -292,7 +292,7 @@
               if (!coordinates) continue;
 
               // 👉 使用扩大后的轮廓（比实际大 3 米）
-              const expandedCoordinates = expandPolygon(coordinates, 3);
+              const expandedCoordinates = expandPolygon(coordinates, 5);
               const finalCoordinates = expandedCoordinates || coordinates; // 降级使用原坐标
 
               const bottomHeight = 0;

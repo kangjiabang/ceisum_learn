@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module">
+    Cesium.Ion.defaultAccessToken =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k';
+
+const viewer = new Cesium.Viewer("cesiumContainer");
+
+// GeoJSON DataSource
+let geoJsonDataSource = null;
+let selectedEntity = null;
+
+// 默认/高亮样式
+const DEFAULT_FILL = Cesium.Color.GREY.withAlpha(0.1);
+const HIGHLIGHT_FILL = Cesium.Color.YELLOW.withAlpha(0.4);
+
+const DEFAULT_OUTLINE = Cesium.Color.WHITE;
+const HIGHLIGHT_OUTLINE = Cesium.Color.RED;
+
+const DEFAULT_OUTLINE_WIDTH = 1;
+const HIGHLIGHT_OUTLINE_WIDTH = 4;
+
+// 加载 GeoJSON
+async function loadGeoJson(url) {
+  geoJsonDataSource = await Cesium.GeoJsonDataSource.load(url, {
+    clampToGround: true
+  });
+
+  const entities = geoJsonDataSource.entities.values;
+
+  entities.forEach(entity => {
+    if (entity.polygon) {
+      entity.polygon.outline = true;
+      entity.polygon.outlineWidth = DEFAULT_OUTLINE_WIDTH;
+
+      // ★ 使用单一 material 控制颜色
+      entity.polygon.material = new Cesium.CallbackProperty(() => {
+        return entity === selectedEntity ? HIGHLIGHT_FILL : DEFAULT_FILL;
+      }, false);
+
+      // 边框动态色
+      entity.polygon.outlineColor = new Cesium.CallbackProperty(() => {
+        return entity === selectedEntity ? HIGHLIGHT_OUTLINE : DEFAULT_OUTLINE;
+      }, false);
+    }
+  });
+
+  viewer.dataSources.add(geoJsonDataSource);
+}
+
+await loadGeoJson("./330100.geojson");
+
+
+// 面积缓存（避免每次 pick 都计算）
+const areaCache = new WeakMap();
+
+// 计算 polygon 面积（WGS84 -> 平面面积）
+function computeArea(entity) {
+  if (areaCache.has(entity)) return areaCache.get(entity);
+
+  const hierarchy = entity.polygon.hierarchy.getValue();
+  const positions = hierarchy.positions;
+
+  // 关键修复：指定椭球体进行坐标转换
+  const ellipsoid = viewer.scene.globe.ellipsoid; 
+
+  let area = 0;
+  for (let i = 0; i < positions.length; i++) {
+    // 使用 ellipsoid.cartesianToCartographic 替代 Cesium.Cartographic.fromCartesian
+    const p1 = ellipsoid.cartesianToCartographic(positions[i]); 
+    const p2 = ellipsoid.cartesianToCartographic(positions[(i + 1) % positions.length]);
+    
+    // 使用弧度计算面积
+    area += p1.longitude * p2.latitude - p2.longitude * p1.latitude;
+  }
+  
+  // 地理多边形面积公式
+  area = Math.abs(area) * ellipsoid.maximumRadius * ellipsoid.maximumRadius / 2;
+
+  areaCache.set(entity, area);
+  return area;
+}
+// 处理点击
+const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+handler.setInputAction(function (movement) {
+  const picked = viewer.scene.drillPick(movement.position);
+
+  // 仅过滤 GeoJSON 实体
+  const matched = picked
+    .map(p => p.id)
+    .filter(e => e && geoJsonDataSource.entities.contains(e));
+
+  if (matched.length === 0) {
+    selectedEntity = null;
+    return;
+  }
+
+  // ★ 优先选择面积最小（最内层）Polygon
+  matched.sort((a, b) => computeArea(a) - computeArea(b));
+  selectedEntity = matched[0];
+
+  console.log("选中区域:", selectedEntity.properties?.Name?.getValue());
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+
+  </script>
+</body>
+
+</html>
