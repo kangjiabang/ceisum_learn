@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+    <link
+      href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css"
+      rel="stylesheet"
+    />
+    <link href="style.css" rel="stylesheet" />
+  </head>
+
+  <body>
+    <div id="cesiumContainer"></div>
+    <script type="module">
+      // Your access token can be found at: https://ion.cesium.com/tokens.
+      // This is the default access token from your ion account
+
+      Cesium.Ion.defaultAccessToken =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k";
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        shouldDebug: true,
+      });
+
+      // 存储创建的实体
+      let droneEntity = null;
+      let rayEntities = [];
+
+      //加载 3D Tileset（自动解析 B3DM）
+      const tileset = viewer.scene.primitives.add(
+        await Cesium.Cesium3DTileset.fromUrl(
+          "https://gl.hangzhoudk.com/modelfile/tileset.json",
+          {
+            debugShowBoundingVolume: false,
+          }
+        )
+      );
+
+      tileset.loadProgress.addEventListener((numberOfPendingRequests) => {
+        console.log(`正在加载: ${numberOfPendingRequests} 个请求`);
+      });
+
+      // 定位到 Tileset
+      viewer.zoomTo(tileset);
+
+      // 设置无人机位置为地形高度 + 适当偏移
+      const initialPosition = Cesium.Cartesian3.fromDegrees(
+        119.99806,
+        30.282778,
+        250 // 在地形高度基础上增加50米
+      );
+
+      const heading = Cesium.Math.toRadians(-90); // 水平方向偏转90度
+      const pitch = Cesium.Math.toRadians(0); // 俯仰角 0 度
+      const roll = Cesium.Math.toRadians(0); // 滚转角 0 度
+
+      const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        initialPosition, // 无人机的当前位置
+        hpr
+      );
+
+      droneEntity = viewer.entities.add({
+        name: "无人机",
+        position: initialPosition,
+        orientation: orientation,
+
+        model: {
+          uri: "/models/drone_gloom.glb",
+          minimumPixelSize: 128,
+          maximumScale: 200,
+          scale: 10,
+        },
+      });
+
+      // 定位到 Tileset
+      viewer.flyTo(droneEntity);
+    </script>
+  </body>
+</html>

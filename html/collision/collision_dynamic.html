@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <link
+      href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css"
+      rel="stylesheet"
+    />
+    <style>
+      #cesiumContainer {
+        width: 100%;
+        height: 100vh;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="cesiumContainer"></div>
+    <script type="module">
+      Cesium.Ion.defaultAccessToken =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k";
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        animation: false,
+        timeline: false,
+      });
+
+      viewer.clock.shouldAnimate = true;
+      viewer.clock.multiplier = 5;
+
+      // ==========================
+      // 动态无人机航点
+      // ==========================
+      const waypoints = [
+        { lon: 119.99806, lat: 30.282778, alt: 250, gs: 3 },
+        { lon: 119.99806, lat: 30.283778, alt: 250, gs: 2 },
+        { lon: 119.99906, lat: 30.283778, alt: 250, gs: 5 },
+        { lon: 119.99906, lat: 30.282778, alt: 250, gs: 10 },
+        { lon: 119.99806, lat: 30.282778, alt: 250, gs: 4 },
+      ];
+
+      // ==========================
+      // ★ 固定无人机
+      // ==========================
+      const fixedDrone = {
+        lon: 119.9995,
+        lat: 30.2832,
+        alt: 250,
+      };
+
+      // 固定无人机实体
+      const fixedDroneEntity = viewer.entities.add({
+        name: "FixedDrone",
+        position: Cesium.Cartesian3.fromDegrees(
+          fixedDrone.lon,
+          fixedDrone.lat,
+          fixedDrone.alt
+        ),
+        model: {
+          uri: "/models/drone_gloom.glb",
+          scale: 30,
+          color: Cesium.Color.YELLOW,
+        },
+      });
+
+      // -------------------------
+      // 预计算每段飞行时间 & 累计时间
+      // -------------------------
+      const R = 6378137;
+      const segmentTimes = [];
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const p1 = waypoints[i];
+        const p2 = waypoints[i + 1];
+        // 使用 haversine 近似
+        const dLat = Cesium.Math.toRadians(p2.lat - p1.lat);
+        const dLon = Cesium.Math.toRadians(p2.lon - p1.lon);
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(Cesium.Math.toRadians(p1.lat)) *
+            Math.cos(Cesium.Math.toRadians(p2.lat)) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const gs = Math.max(p1.gs || 1, 0.0001);
+        segmentTimes.push(distance / gs);
+      }
+      const cumulativeTimes = [0];
+      for (let i = 0; i < segmentTimes.length; i++) {
+        cumulativeTimes.push(cumulativeTimes[i] + segmentTimes[i]);
+      }
+
+      const MODEL_HEADING_OFFSET_DEGREES = -90;
+
+      // -------------------------
+      // 全局缓存：碰撞盒
+      // -------------------------
+      let boxPos = new Cesium.Cartesian3();
+      let boxOri = Cesium.Quaternion.IDENTITY;
+      let boxLength = 50;
+
+      // 颜色控制变量（会在每帧更新）
+      let boxColor = Cesium.Color.GREEN.withAlpha(0.3);
+      let boxOutlineColor = Cesium.Color.GREEN;
+
+      // 使用 ColorMaterialProperty 包裹 CallbackProperty，使颜色可变
+      const colorProperty = new Cesium.ColorMaterialProperty(
+        new Cesium.CallbackProperty(() => boxColor, false)
+      );
+      const outlineColorProperty = new Cesium.CallbackProperty(
+        () => boxOutlineColor,
+        false
+      );
+
+      const collisionEntity = viewer.entities.add({
+        name: "CollisionBox",
+        position: new Cesium.CallbackProperty(() => boxPos, false),
+        orientation: new Cesium.CallbackProperty(() => boxOri, false),
+        box: {
+          dimensions: new Cesium.CallbackProperty(() => {
+            return new Cesium.Cartesian3(boxLength, 10, 20);
+          }, false),
+          material: colorProperty,
+          outline: true,
+          outlineColor: outlineColorProperty,
+        },
+      });
+
+      function updateCollisionBox(drone, droneQuat) {
+        const T_alert = 10;
+        const L_min = 20;
+        const L_max = 100;
+
+        const L_forward = Math.min(L_min + drone.gs * T_alert, L_max);
+        const L_back = L_min / 2;
+        boxLength = L_forward + L_back;
+
+        boxOri = droneQuat;
+
+        const D_offset = (L_forward - L_back) / 2;
+        const offsetLocal = new Cesium.Cartesian3(D_offset, 0, 0);
+        const rotMat = Cesium.Matrix3.fromQuaternion(droneQuat);
+        const offsetWorld = Cesium.Matrix3.multiplyByVector(
+          rotMat,
+          offsetLocal,
+          new Cesium.Cartesian3()
+        );
+
+        const dronePos = Cesium.Cartesian3.fromDegrees(
+          drone.lon,
+          drone.lat,
+          drone.alt
+        );
+        Cesium.Cartesian3.add(dronePos, offsetWorld, boxPos);
+      }
+
+      // -------------------------
+      // 动态无人机实体 & 初始状态
+      // -------------------------
+      let currentDroneState = {
+        ...waypoints[0],
+        orientation: Cesium.Quaternion.IDENTITY,
+      };
+
+      const droneEntity = viewer.entities.add({
+        name: "Drone",
+        position: new Cesium.CallbackProperty(() => {
+          return Cesium.Cartesian3.fromDegrees(
+            currentDroneState.lon,
+            currentDroneState.lat,
+            currentDroneState.alt
+          );
+        }, false),
+        orientation: new Cesium.CallbackProperty(
+          () => currentDroneState.orientation,
+          false
+        ),
+        model: {
+          uri: "/models/drone_gloom.glb",
+          scale: 30,
+        },
+      });
+
+      viewer.flyTo(collisionEntity);
+
+      // -------------------------
+      // 路径朝向 quaternion
+      // -------------------------
+      function computeHeadingQuaternion(current, next) {
+        const deltaLon = next.lon - current.lon;
+        const deltaLat = next.lat - current.lat;
+        let heading = Math.atan2(deltaLon, deltaLat);
+        heading += Cesium.Math.toRadians(MODEL_HEADING_OFFSET_DEGREES);
+        const pos = Cesium.Cartesian3.fromDegrees(
+          current.lon,
+          current.lat,
+          current.alt
+        );
+        return Cesium.Transforms.headingPitchRollQuaternion(
+          pos,
+          new Cesium.HeadingPitchRoll(heading, 0, 0)
+        );
+      }
+
+      // ==========================
+      // 计算 box 的 8 个顶点 (世界坐标 -> 经纬度)
+      // ==========================
+      function getBoxCornersLonLat() {
+        const dimensions = new Cesium.Cartesian3(boxLength, 10, 20);
+        const half = new Cesium.Cartesian3(
+          dimensions.x / 2,
+          dimensions.y / 2,
+          dimensions.z / 2
+        );
+
+        const cornersLocal = [
+          [+half.x, +half.y, +half.z],
+          [+half.x, -half.y, +half.z],
+          [-half.x, -half.y, +half.z],
+          [-half.x, +half.y, +half.z],
+          [+half.x, +half.y, -half.z],
+          [+half.x, -half.y, -half.z],
+          [-half.x, -half.y, -half.z],
+          [-half.x, +half.y, -half.z],
+        ];
+
+        const rotMat = Cesium.Matrix3.fromQuaternion(boxOri);
+
+        return cornersLocal.map((c) => {
+          const local = new Cesium.Cartesian3(c[0], c[1], c[2]);
+          const rotated = Cesium.Matrix3.multiplyByVector(
+            rotMat,
+            local,
+            new Cesium.Cartesian3()
+          );
+          const world = Cesium.Cartesian3.add(
+            boxPos,
+            rotated,
+            new Cesium.Cartesian3()
+          );
+          const carto = Cesium.Cartographic.fromCartesian(world);
+          return [
+            Cesium.Math.toDegrees(carto.longitude),
+            Cesium.Math.toDegrees(carto.latitude),
+          ];
+        });
+      }
+
+      // ==========================
+      // Turf.js 计算点 -> 碰撞盒边缘最近距离 (米)
+      // 取顶面 4 点作为水平多边形边缘
+      // ==========================
+      function computeTurfDistanceMeters() {
+        const corners = getBoxCornersLonLat();
+        const topFace = [corners[0], corners[1], corners[2], corners[3]];
+        const ring = [...topFace, topFace[0]];
+
+        const p = turf.point([fixedDrone.lon, fixedDrone.lat]);
+
+        let minDist = Infinity;
+        for (let i = 0; i < ring.length - 1; i++) {
+          const a = ring[i];
+          const b = ring[i + 1];
+          const line = turf.lineString([a, b]);
+          const d = turf.pointToLineDistance(p, line, { units: "meters" });
+          if (d < minDist) minDist = d;
+        }
+
+        const poly = turf.polygon([ring]);
+        if (turf.booleanPointInPolygon(p, poly)) return 0;
+
+        return minDist;
+      }
+
+      // ==========================
+      // Label 显示 Turf 距离 与 状态文案
+      // ==========================
+      let currentDistance = 0;
+
+      const distanceLabel = viewer.entities.add({
+        position: new Cesium.CallbackProperty(() => boxPos, false),
+        label: {
+          text: new Cesium.CallbackProperty(() => {
+            // 三档文案
+            if (currentDistance > 100) {
+              return `安全：与固定无人机距离 ${currentDistance.toFixed(2)} m`;
+            } else if (currentDistance > 50) {
+              return `注意：与固定无人机距离 ${currentDistance.toFixed(
+                2
+              )} m（中等）`;
+            } else {
+              return `警告：与固定无人机距离 ${currentDistance.toFixed(
+                2
+              )} m（危险）`;
+            }
+          }, false),
+          font: "18px sans-serif",
+          fillColor: new Cesium.CallbackProperty(() => {
+            // 文字颜色也随状态变化（可选）
+            if (currentDistance > 100) return Cesium.Color.WHITE;
+            if (currentDistance > 50) return Cesium.Color.BLACK;
+            return Cesium.Color.WHITE;
+          }, false),
+          showBackground: true,
+          backgroundColor: new Cesium.CallbackProperty(() => {
+            if (currentDistance > 100) return Cesium.Color.BLACK.withAlpha(0.6);
+            if (currentDistance > 50) return Cesium.Color.YELLOW.withAlpha(0.8);
+            return Cesium.Color.RED.withAlpha(0.8);
+          }, false),
+          pixelOffset: new Cesium.Cartesian2(0, -40),
+        },
+      });
+
+      // -------------------------
+      // 逐帧更新（无人机插值、box、Turf距离、颜色）
+      // -------------------------
+      viewer.clock.onTick.addEventListener(function (clock) {
+        const tSec = Cesium.JulianDate.secondsDifference(
+          clock.currentTime,
+          clock.startTime
+        );
+
+        let segmentIndex = 0;
+        while (
+          segmentIndex < cumulativeTimes.length - 1 &&
+          tSec >= cumulativeTimes[segmentIndex + 1]
+        ) {
+          segmentIndex++;
+        }
+        if (segmentIndex >= waypoints.length - 1) return;
+
+        const p1 = waypoints[segmentIndex];
+        const p2 = waypoints[segmentIndex + 1];
+        const denom =
+          cumulativeTimes[segmentIndex + 1] - cumulativeTimes[segmentIndex];
+        const t =
+          denom === 0 ? 0 : (tSec - cumulativeTimes[segmentIndex]) / denom;
+
+        const lat = p1.lat + t * (p2.lat - p1.lat);
+        const lon = p1.lon + t * (p2.lon - p1.lon);
+        const alt = p1.alt + t * (p2.alt - p1.alt);
+        const gs = p1.gs;
+
+        const nextWaypoint =
+          segmentIndex < waypoints.length - 1
+            ? waypoints[segmentIndex + 1]
+            : p2;
+        const quat = computeHeadingQuaternion({ lon, lat, alt }, nextWaypoint);
+
+        currentDroneState = { lat, lon, alt, gs, orientation: quat };
+
+        updateCollisionBox(currentDroneState, quat);
+
+        // Turf 距离 (米)
+        currentDistance = computeTurfDistanceMeters();
+
+        // 根据 currentDistance 更新 box 的颜色（并自动由 CallbackProperty 生效）
+        if (currentDistance > 100) {
+          boxColor = Cesium.Color.GREEN.withAlpha(0.3);
+          boxOutlineColor = Cesium.Color.GREEN;
+        } else if (currentDistance > 50) {
+          boxColor = Cesium.Color.YELLOW.withAlpha(0.4);
+          boxOutlineColor = Cesium.Color.ORANGE;
+        } else {
+          boxColor = Cesium.Color.RED.withAlpha(0.5);
+          boxOutlineColor = Cesium.Color.RED;
+        }
+      });
+    </script>
+  </body>
+</html>

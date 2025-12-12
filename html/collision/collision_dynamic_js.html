@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <link
+      href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css"
+      rel="stylesheet"
+    />
+    <style>
+      #cesiumContainer {
+        width: 100%;
+        height: 100vh;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="cesiumContainer"></div>
+    <script type="module">
+      import { DroneSafetyBox } from "../../src/droneSafetyBox.js";
+      Cesium.Ion.defaultAccessToken =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k";
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        animation: false,
+        timeline: false,
+      });
+
+      // ==========================
+      // 动态无人机航点
+      // ==========================
+      const waypoints = [
+        { lon: 119.99806, lat: 30.282778, alt: 250, gs: 3 },
+        { lon: 119.99806, lat: 30.283778, alt: 250, gs: 2 },
+        { lon: 119.99906, lat: 30.283778, alt: 250, gs: 5 },
+        { lon: 119.99906, lat: 30.282778, alt: 250, gs: 10 },
+        { lon: 119.99806, lat: 30.282778, alt: 250, gs: 4 },
+      ];
+
+      // 在 onTick 外部
+      let currentDroneState = {
+        position: Cesium.Cartesian3.fromDegrees(
+          waypoints[0].lon,
+          waypoints[0].lat,
+          waypoints[0].alt
+        ),
+        orientation: Cesium.Quaternion.IDENTITY,
+      };
+      const currentDroneEntity = viewer.entities.add({
+        name: "CurrentDrone",
+        position: new Cesium.CallbackProperty(
+          () => currentDroneState.position,
+          false
+        ),
+        orientation: new Cesium.CallbackProperty(
+          () => currentDroneState.orientation,
+          false
+        ),
+        model: {
+          uri: "/models/drone_gloom.glb", // 或使用测试模型
+          scale: 30,
+          minimumPixelSize: 64,
+          color: Cesium.Color.WHITE, // 可选：覆盖模型颜色
+        },
+      });
+
+      viewer.clock.shouldAnimate = true;
+      viewer.clock.multiplier = 5;
+
+      // 创建安全盒管理器
+      const safetyBox = new DroneSafetyBox(viewer, {
+        T_alert: 10,
+        L_min: 20,
+        L_max: 100,
+        boxWidth: 10,
+        boxHeight: 20,
+      });
+
+      // ==========================
+      // ★ 多架固定无人机
+      // ==========================
+      const fixedDrones = [
+        { lon: 119.9995, lat: 30.2832, alt: 250 },
+        { lon: 119.9985, lat: 30.283, alt: 250 },
+        { lon: 119.999, lat: 30.2829, alt: 250 },
+      ];
+
+      const fixedDroneEntities = fixedDrones.map((fd, i) =>
+        viewer.entities.add({
+          name: "FixedDrone_" + i,
+          position: Cesium.Cartesian3.fromDegrees(fd.lon, fd.lat, fd.alt),
+          model: {
+            uri: "/models/drone_gloom.glb",
+            scale: 30,
+            color: Cesium.Color.YELLOW,
+          },
+        })
+      );
+      // -------------------------
+      // 预计算每段飞行时间 & 累计时间
+      // -------------------------
+      const R = 6378137;
+      const segmentTimes = [];
+
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const p1 = waypoints[i];
+        const p2 = waypoints[i + 1];
+
+        const dLat = Cesium.Math.toRadians(p2.lat - p1.lat);
+        const dLon = Cesium.Math.toRadians(p2.lon - p1.lon);
+
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(Cesium.Math.toRadians(p1.lat)) *
+            Math.cos(Cesium.Math.toRadians(p2.lat)) *
+            Math.sin(dLon / 2) ** 2;
+
+        const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const gs = Math.max(p1.gs || 1, 0.0001);
+
+        segmentTimes.push(distance / gs);
+      }
+      const cumulativeTimes = [0];
+      for (let i = 0; i < segmentTimes.length; i++) {
+        cumulativeTimes.push(cumulativeTimes[i] + segmentTimes[i]);
+      }
+
+      // 在 onTick 外部，首次更新后飞一次
+      let hasFlown = false;
+
+      // ==========================
+      // 每帧更新
+      // ==========================
+      viewer.clock.onTick.addEventListener(function (clock) {
+        const tSec = Cesium.JulianDate.secondsDifference(
+          clock.currentTime,
+          clock.startTime
+        );
+
+        let segmentIndex = 0;
+        while (
+          segmentIndex < cumulativeTimes.length - 1 &&
+          tSec >= cumulativeTimes[segmentIndex + 1]
+        ) {
+          segmentIndex++;
+        }
+        if (segmentIndex >= waypoints.length - 1) return;
+
+        const p1 = waypoints[segmentIndex];
+        const p2 = waypoints[segmentIndex + 1];
+        const denom =
+          cumulativeTimes[segmentIndex + 1] - cumulativeTimes[segmentIndex];
+
+        const t =
+          denom === 0 ? 0 : (tSec - cumulativeTimes[segmentIndex]) / denom;
+
+        const lat = p1.lat + t * (p2.lat - p1.lat);
+        const lon = p1.lon + t * (p2.lon - p1.lon);
+        const alt = p1.alt + t * (p2.alt - p1.alt);
+        const gs = p1.gs;
+
+        // === 计算 heading（弧度）===
+        let headingRad;
+        if (segmentIndex < waypoints.length - 1) {
+          const nextWp = waypoints[segmentIndex + 1];
+          const deltaLon = nextWp.lon - lon;
+          const deltaLat = nextWp.lat - lat;
+          headingRad = Math.atan2(deltaLon, deltaLat); // 返回弧度
+        } else {
+          // 最后一段，保持最后一个方向
+          const lastSeg = waypoints.length - 2;
+          const deltaLon = waypoints[lastSeg + 1].lon - waypoints[lastSeg].lon;
+          const deltaLat = waypoints[lastSeg + 1].lat - waypoints[lastSeg].lat;
+          headingRad = Math.atan2(deltaLon, deltaLat);
+        }
+
+        // ------------------------------------------------------------------
+        // ✅ 关键修改点 1：将弧度转换为角度，用于传入 safetyBox.update
+        // ------------------------------------------------------------------
+        const headingDegrees = Cesium.Math.toDegrees(headingRad);
+
+        // ------------------------------------------------------------------
+        // ✅ 关键修改点 2：使用弧度值计算无人机模型自身的四元数
+        // ------------------------------------------------------------------
+        // 计算四元数：使用原始弧度值 (headingRad)
+        const correctedHeadingRad = headingRad + Cesium.Math.toRadians(-90);
+        const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+        const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+          position,
+          new Cesium.HeadingPitchRoll(correctedHeadingRad, 0, 0)
+        );
+
+        // 更新状态（供 CallbackProperty 使用）
+        currentDroneState.position = position;
+        currentDroneState.orientation = orientation;
+
+        // 调用 update，传入角度值
+        const minDistance = safetyBox.update(
+          { lon, lat, alt, gs, heading: headingDegrees }, // 传入角度
+          fixedDrones
+        );
+
+        if (!hasFlown) {
+          safetyBox.flyToDrone({ duration: 3.0 });
+          hasFlown = true;
+        }
+      });
+    </script>
+  </body>
+</html>

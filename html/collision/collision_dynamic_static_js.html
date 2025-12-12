@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <link
+      href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css"
+      rel="stylesheet"
+    />
+    <style>
+      #cesiumContainer {
+        width: 100%;
+        height: 100vh;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="cesiumContainer"></div>
+    <script type="module">
+      import { DroneSafetyBox } from "../../src/droneSafetyBox.js";
+      Cesium.Ion.defaultAccessToken =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1OGIzZmQyZC03YjNiLTQzMjQtOWQxYS0xOTYxZWUyMTYzMjQiLCJpZCI6MzEzMjQxLCJpYXQiOjE3NTAyMjc2NDd9.G9X0WofFDt3mbp2L_WDzU__rcAVg0v3rpAliG1sgB9k";
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        animation: false,
+        timeline: false,
+      });
+
+      // ==========================
+      // 动态无人机航点
+      // ==========================
+      const waypoints = [
+        { lon: 119.99806, lat: 30.282778, alt: 250, gs: 3, heading: -30 },
+        { lon: 119.99806, lat: 30.283778, alt: 250, gs: 2, heading: 50 },
+        { lon: 119.99906, lat: 30.283778, alt: 250, gs: 5, heading: 60 },
+        { lon: 119.99906, lat: 30.282778, alt: 250, gs: 10, heading: 90 },
+        { lon: 119.99806, lat: 30.282778, alt: 250, gs: 4, heading: 120 },
+      ];
+
+      // 在 onTick 外部
+      // 计算初始朝向（heading 是角度）
+      const initialHeadingRad = Cesium.Math.toRadians(waypoints[0].heading);
+      const initialCorrectedHeading =
+        initialHeadingRad + Cesium.Math.toRadians(-90); // 适配模型
+
+      const initialPosition = Cesium.Cartesian3.fromDegrees(
+        waypoints[0].lon,
+        waypoints[0].lat,
+        waypoints[0].alt
+      );
+
+      const initialOrientation = Cesium.Transforms.headingPitchRollQuaternion(
+        initialPosition,
+        new Cesium.HeadingPitchRoll(initialCorrectedHeading, 0, 0)
+      );
+
+      let currentDroneState = {
+        position: initialPosition,
+        orientation: initialOrientation,
+      };
+      const currentDroneEntity = viewer.entities.add({
+        name: "CurrentDrone",
+        position: new Cesium.CallbackProperty(
+          () => currentDroneState.position,
+          false
+        ),
+        orientation: new Cesium.CallbackProperty(
+          () => currentDroneState.orientation,
+          false
+        ),
+        model: {
+          uri: "/models/drone_gloom.glb", // 或使用测试模型
+          scale: 30,
+          minimumPixelSize: 64,
+          color: Cesium.Color.WHITE, // 可选：覆盖模型颜色
+        },
+      });
+
+      viewer.clock.shouldAnimate = true;
+      viewer.clock.multiplier = 5;
+
+      // 创建安全盒管理器
+      const safetyBox = new DroneSafetyBox(viewer, {
+        T_alert: 10,
+        L_min: 20,
+        L_max: 100,
+        boxWidth: 10,
+        boxHeight: 20,
+      });
+
+      // ==========================
+      // ★ 多架固定无人机
+      // ==========================
+      const fixedDrones = [
+        { lon: 119.9995, lat: 30.2832, alt: 250 },
+        { lon: 119.9985, lat: 30.283, alt: 250 },
+        { lon: 119.999, lat: 30.2829, alt: 250 },
+      ];
+
+      const fixedDroneEntities = fixedDrones.map((fd, i) =>
+        viewer.entities.add({
+          name: "FixedDrone_" + i,
+          position: Cesium.Cartesian3.fromDegrees(fd.lon, fd.lat, fd.alt),
+          model: {
+            uri: "/models/drone_gloom.glb",
+            scale: 30,
+            color: Cesium.Color.YELLOW,
+          },
+        })
+      );
+     
+      // 调用 update，不再传 nextWp！
+      const minDistance = safetyBox.update(
+        {
+          lon: waypoints[0].lon,
+          lat: waypoints[0].lat,
+          alt: waypoints[0].alt,
+          heading: waypoints[0].heading,
+        },
+        fixedDrones
+      );
+
+      safetyBox.flyToDrone({ duration: 3.0 });
+    </script>
+  </body>
+</html>
